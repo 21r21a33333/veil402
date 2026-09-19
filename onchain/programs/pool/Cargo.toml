@@ -14,12 +14,21 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
-idl-build = ["anchor-lang/idl-build"]
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
 
 [dependencies]
 anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 anchor-spl = "0.32.1"
 solana-poseidon = "2"
+# Audited Poseidon Merkle tree (Light Protocol), reused as-is; convention verified byte-identical to
+# our circuit. Git dep (not on crates.io); pin a rev before production.
+light-hasher = { git = "https://github.com/Lightprotocol/light-protocol", branch = "main" }
+light-concurrent-merkle-tree = { git = "https://github.com/Lightprotocol/light-protocol", branch = "main" }
+ark-bn254 = "0.5"
+ark-ff = "0.5"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
