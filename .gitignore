@@ -1,0 +1,22 @@
+# Rust / Anchor
+**/target/
+*-keypair.json
+payer*.json
+
+# Noir / bb / Sunspot artifacts
+*.gz
+*.acir
+*.ccs
+*.pk
+*.vk
+*.proof
+*.pw
+*.so
+
+# Node
+**/node_modules/
+**/package-lock.json
+
+# OS
+.DS_Store
+*.log
