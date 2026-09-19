@@ -20,3 +20,6 @@ payer*.json
 # OS
 .DS_Store
 *.log
+
+# Noir witness input (generated, demo values)
+**/Prover.toml

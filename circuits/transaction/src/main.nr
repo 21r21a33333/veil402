@@ -142,3 +142,24 @@ fn rejects_value_inflation() {
         out_value,
     );
 }
+
+#[test]
+fn emit_prover_toml() {
+    // Fixed transfer witness -> prints the 3 computed public inputs for Prover.toml.
+    let spending_key = 11;
+    let viewing_key = 22;
+    let in_random = 33;
+    let asset_id = 1;
+    let in_value = 1000;
+    let nk = bn254::hash_1([viewing_key]);
+    let mpk = bn254::hash_2([bn254::hash_1([spending_key]), nk]);
+    let in_npk = bn254::hash_2([mpk, in_random]);
+    let in_commitment = bn254::hash_3([in_npk, asset_id, in_value]);
+    let siblings: [Field; TREE_DEPTH] = [0; TREE_DEPTH];
+    let root = merkle::compute_root(in_commitment, siblings, 0);
+    let nullifier = bn254::hash_2([nk, 0]);
+    let out_commitment = bn254::hash_3([4242, asset_id, in_value]);
+    println(f"root = {root}");
+    println(f"nullifier = {nullifier}");
+    println(f"out_commitment = {out_commitment}");
+}
