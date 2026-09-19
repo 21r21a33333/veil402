@@ -22,7 +22,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "prover initialization failed")
 		os.Exit(1)
 	}
-	if err := serve(os.Stdin, os.Stdout, prover); err != nil {
+	if err := serve(os.Stdin, os.Stdout, prover, func() { os.Exit(0) }); err != nil {
 		fmt.Fprintln(os.Stderr, "prover protocol failed")
 		os.Exit(1)
 	}

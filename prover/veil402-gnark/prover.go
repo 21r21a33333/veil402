@@ -38,10 +38,11 @@ type manifest struct {
 }
 
 type prover struct {
-	program acir.ACIR[*sunbn254.BN254Field, constraint.U64]
-	ccs     constraint.ConstraintSystem
-	pk      groth16.ProvingKey
-	vk      groth16.VerifyingKey
+	artifact string
+	program  acir.ACIR[*sunbn254.BN254Field, constraint.U64]
+	ccs      constraint.ConstraintSystem
+	pk       groth16.ProvingKey
+	vk       groth16.VerifyingKey
 }
 
 func openProver(directory string) (*prover, error) {
@@ -89,7 +90,7 @@ func openProver(directory string) (*prover, error) {
 		return nil, err
 	}
 
-	return &prover{program: program, ccs: ccs, pk: pk, vk: vk}, nil
+	return &prover{artifact: manifest.ID, program: program, ccs: ccs, pk: pk, vk: vk}, nil
 }
 
 func (prover *prover) prove(encoded []byte) ([]byte, []byte, error) {

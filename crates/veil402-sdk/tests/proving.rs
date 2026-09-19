@@ -111,11 +111,13 @@ async fn proves_and_verifies_locally() -> Result<(), Box<dyn StdError>> {
     }
 
     let veil = Veil::open(Config::new(worker, artifacts()?))?;
-    let transaction = transaction()?;
-    let expected = transaction.inputs()?;
-    let proof = veil.prove(transaction).await?;
-    assert_eq!(proof.bytes.len(), 388);
-    assert_eq!(proof.public, expected);
-    assert_eq!(proof.artifact, "transaction-v1");
+    for _ in 0..2 {
+        let transaction = transaction()?;
+        let expected = transaction.inputs()?;
+        let proof = veil.prove(transaction).await?;
+        assert_eq!(proof.bytes.len(), 388);
+        assert_eq!(proof.public, expected);
+        assert_eq!(proof.artifact, "transaction-v1");
+    }
     Ok(())
 }

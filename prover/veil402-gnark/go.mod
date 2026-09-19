@@ -4,8 +4,9 @@ go 1.24.2
 
 require (
 	github.com/consensys/gnark v0.14.0
-	github.com/consensys/gnark-crypto v0.19.0
+	github.com/consensys/gnark-crypto v0.19.2
 	github.com/reilabs/sunspot/go v0.0.0-20260826142849-43891c5de8a2
+	google.golang.org/protobuf v1.36.10
 )
 
 require (

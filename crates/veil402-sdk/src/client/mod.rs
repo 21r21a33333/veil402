@@ -90,7 +90,15 @@ impl Veil {
         let mut slot = self.worker.lock().await;
         let mut worker = match slot.take() {
             Some(worker) => worker,
-            None => Worker::start(&self.executable, &self.directory)?,
+            None => {
+                Worker::start(
+                    &self.executable,
+                    &self.directory,
+                    &self.artifacts.manifest.id,
+                    self.timeout,
+                )
+                .await?
+            }
         };
         let (bytes, public) = worker.prove(&witness, self.timeout).await?;
         if public != witness.public.witness_bytes() {
