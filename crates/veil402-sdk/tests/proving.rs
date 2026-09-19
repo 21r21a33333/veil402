@@ -57,7 +57,7 @@ fn root() -> Result<&'static Path, Box<dyn StdError>> {
 }
 
 fn artifacts() -> Result<std::path::PathBuf, Box<dyn StdError>> {
-    Ok(root()?.join("prover/veil402-gnark/artifacts/transaction-v1"))
+    Ok(root()?.join("prover/veil402-gnark/artifacts/transaction-v2"))
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn rejects_corrupt_artifacts() -> Result<(), Box<dyn StdError>> {
     let directory = tempdir()?;
     let source = artifacts()?;
     let manifest = fs::read_to_string(source.join("manifest.json"))?.replace(
-        "9a1cf9fd2ab80538430a2d4f35fccbc436b97ef22e440fe7486d7d01a3fd5efe",
+        "5304e0ba5ea00037b9b2e6903b0be89fb29a7ed7db85778758ad5ce50833216a",
         "0000000000000000000000000000000000000000000000000000000000000000",
     );
     fs::write(directory.path().join("manifest.json"), manifest)?;
@@ -117,7 +117,7 @@ async fn proves_and_verifies_locally() -> Result<(), Box<dyn StdError>> {
         let proof = veil.prove(transaction).await?;
         assert_eq!(proof.bytes.len(), 388);
         assert_eq!(proof.public, expected);
-        assert_eq!(proof.artifact, "transaction-v1");
+        assert_eq!(proof.artifact, "transaction-v2");
     }
     Ok(())
 }

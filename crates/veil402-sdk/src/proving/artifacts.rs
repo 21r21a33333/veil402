@@ -8,7 +8,7 @@ use crate::client::Error;
 
 pub(crate) const NOIR_VERSION: &str = "1.0.0-beta.22+c57152f91260ecdb9faad4efc20abb14b6d2ece7";
 const PINNED_MANIFEST: &str =
-    include_str!("../../../../prover/veil402-gnark/artifacts/transaction-v1/manifest.json");
+    include_str!("../../../../prover/veil402-gnark/artifacts/transaction-v2/manifest.json");
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct Manifest {

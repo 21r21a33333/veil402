@@ -9,23 +9,42 @@ use state::*;
 
 declare_id!("D5JudnUPhvtNhVX7g6zYY8E4XcQBhLHgosAGB6mnhqrK");
 
+const BINDING_DOMAIN: &[u8] = b"veil402:transact:v1";
+
 // Veil402 shielded pool. Notes are hidden UTXOs whose commitments live in an audited Poseidon
 // Merkle tree (Light Protocol's light-concurrent-merkle-tree, reused as-is). Spending reveals a
 // nullifier + a Groth16 proof verified by CPI into the Sunspot verifier.
 
-/// Tamper-bound public leg. Its Poseidon hash is a proof public input (binds recipient + fee).
+/// Public withdrawal data bound into the proof.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ExtData {
     pub recipient: Pubkey,
-    pub fee: u64,
     pub encrypted_note: Vec<u8>,
 }
 
 impl ExtData {
-    /// Bind the public leg: Poseidon(recipient_hi, recipient_lo, fee) — the value the client feeds the circuit.
-    fn hash(&self) -> Result<[u8; 32]> {
-        let (hi, lo) = util::split32(&self.recipient.to_bytes());
-        util::poseidon(&[&hi, &lo, &util::u64_be32(self.fee)])
+    fn hash(
+        &self,
+        domain: &[u8; 32],
+        pool: &Pubkey,
+        mint: &Pubkey,
+        ext_amount: i64,
+    ) -> Result<[u8; 32]> {
+        let amount = ext_amount.to_be_bytes();
+        let length = u32::try_from(self.encrypted_note.len())
+            .map_err(|_| error!(PoolError::NoteTooLarge))?
+            .to_be_bytes();
+        Ok(util::keccak_field(&[
+            BINDING_DOMAIN,
+            domain,
+            crate::ID.as_ref(),
+            pool.as_ref(),
+            mint.as_ref(),
+            self.recipient.as_ref(),
+            &amount,
+            &length,
+            &self.encrypted_note,
+        ]))
     }
 }
 
@@ -72,12 +91,13 @@ fn verify_cpi(verifier: &AccountInfo, proof: &[u8], pw: &[u8]) -> Result<()> {
 pub mod pool {
     use super::*;
 
-    pub fn init_pool(ctx: Context<InitPool>) -> Result<()> {
+    pub fn init_pool(ctx: Context<InitPool>, domain: [u8; 32]) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.authority = ctx.accounts.authority.key();
         pool.verifier = ctx.accounts.verifier_program.key();
         pool.mint = ctx.accounts.mint.key();
         pool.asset_id = asset_id_of(&ctx.accounts.mint.key())?;
+        pool.domain = domain;
         pool.bump = ctx.bumps.pool;
 
         state::init_tree(&ctx.accounts.tree.to_account_info())
@@ -130,6 +150,7 @@ pub mod pool {
         // 0. Validate the public leg. Deposits go through `shield`, so transact only spends
         //    (ext_amount <= 0). Cap the note ciphertext.
         require!(ext_amount <= 0, PoolError::ExtAmountMustBeNonPositive);
+        require!(proof.len() == PROOF_BYTES, PoolError::InvalidProofLength);
         require!(
             ext_data.encrypted_note.len() <= MAX_ENCRYPTED_NOTE_LEN,
             PoolError::NoteTooLarge
@@ -146,11 +167,14 @@ pub mod pool {
             PoolError::WrongVerifier
         );
 
-        // 2. Recompute bound values and verify the proof against them. `fee` is bound into
-        //    public_amount but has no payout leg yet, so a nonzero fee is absorbed by the vault.
-        let net = ext_amount as i128 - ext_data.fee as i128;
-        let public_amount = util::public_amount_field(net);
-        let edh = ext_data.hash()?;
+        // 2. Recompute bound values and verify the proof against them.
+        let public_amount = util::public_amount_field(i128::from(ext_amount));
+        let edh = ext_data.hash(
+            &ctx.accounts.pool.domain,
+            &ctx.accounts.pool.key(),
+            &ctx.accounts.pool.mint,
+            ext_amount,
+        )?;
         let pw = public_witness(&root, &nullifier, &out_commitment, &public_amount, &edh);
         verify_cpi(&ctx.accounts.verifier_program, &proof, &pw)?;
 
@@ -203,7 +227,8 @@ pub struct InitPool<'info> {
     pub mint: Account<'info, Mint>,
     #[account(init, payer = authority, associated_token::mint = mint, associated_token::authority = pool)]
     pub vault: Account<'info, TokenAccount>,
-    /// CHECK: Sunspot verifier program; stored and checked on every transact.
+    /// CHECK: executable Sunspot verifier program; stored and checked on every transact.
+    #[account(executable)]
     pub verifier_program: UncheckedAccount<'info>,
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -244,7 +269,8 @@ pub struct Transact<'info> {
     pub nullifier_record: Account<'info, NullifierRecord>,
     #[account(mut, token::mint = mint)]
     pub recipient_ata: Account<'info, TokenAccount>,
-    /// CHECK: validated against pool.verifier before the CPI.
+    /// CHECK: executable and validated against pool.verifier before the CPI.
+    #[account(executable)]
     pub verifier_program: UncheckedAccount<'info>,
     #[account(mut)]
     pub payer: Signer<'info>,

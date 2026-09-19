@@ -3,9 +3,11 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 use crate::{
-    protocol::{PublicInputs, Transaction},
+    protocol::{Output, Public, PublicInputs, Spend, Transaction},
     proving::{Artifacts, Witness, Worker},
+    solana::{Pool, Prepared, Withdrawal},
 };
+use solana_pubkey::Pubkey;
 
 mod error;
 
@@ -111,5 +113,36 @@ impl Veil {
             public: witness.public.clone(),
             artifact: self.artifacts.manifest.id.clone(),
         })
+    }
+
+    /// Proves a withdrawal and builds the exact Solana instruction that consumes it.
+    ///
+    /// Account creation and transaction submission remain the caller's responsibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] when the withdrawal is invalid, proof generation fails, or the
+    /// resulting instruction cannot be encoded.
+    pub async fn withdraw(
+        &self,
+        pool: &Pool,
+        input: Spend,
+        send: Output,
+        withdrawal: Withdrawal,
+        payer: Pubkey,
+    ) -> Result<Prepared, Error> {
+        let public = Public {
+            amount: withdrawal.public_amount(),
+            hash: pool.bind(&withdrawal)?,
+        };
+        let proof = self
+            .prove(Transaction {
+                input,
+                send,
+                public,
+            })
+            .await?;
+        let instruction = pool.instruction(&proof, &withdrawal, payer)?;
+        Ok(Prepared { proof, instruction })
     }
 }

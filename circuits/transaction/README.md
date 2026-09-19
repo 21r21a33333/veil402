@@ -2,6 +2,8 @@
 
 Spend one note, create one note. Proves: ownership, Merkle membership, correct nullifier, output
 well-formedness + `value < 2^64`, and value conservation `in_value + public_amount == out_value`.
+The public external-data hash is constrained to a private witness copy so it cannot be replaced
+after proving.
 
 ## Note / key shapes (finalized by this circuit)
 ```

@@ -1,0 +1,11 @@
+{
+  "id": "transaction-v2",
+  "noir": "1.0.0-beta.22+c57152f91260ecdb9faad4efc20abb14b6d2ece7",
+  "circuit": "12421953636038326336",
+  "files": {
+    "acir": "5304e0ba5ea00037b9b2e6903b0be89fb29a7ed7db85778758ad5ce50833216a",
+    "ccs": "dbbf7fe91aa73f12132246774315ceb1d1927180023672417f510dbb08b97b6e",
+    "pk": "5bd5db2acc7a940166abbabca4231cc0c78e9b8ba4dfdafbccbbba74b01fb0a2",
+    "vk": "76bdd0284b38f9fc1bac852330eb31c382f10e990f7c854fdfb5ec670c4d48dc"
+  }
+}

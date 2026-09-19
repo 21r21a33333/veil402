@@ -59,6 +59,7 @@ fn input_map(transaction: &Transaction, values: &Values) -> InputMap {
     input.insert("out_commitment".into(), value(public.commitment));
     input.insert("public_amount".into(), value(public.amount));
     input.insert("ext_data_hash".into(), value(public.hash));
+    input.insert("bound_hash".into(), value(public.hash));
     input.insert(
         "in_value".into(),
         value(Field::from(transaction.input.note.value)),

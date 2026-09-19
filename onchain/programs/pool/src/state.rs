@@ -10,7 +10,8 @@ pub const CHANGELOG_SIZE: usize = 8; // small: keeps the account < the 10KB CPI-
 pub const ROOTS_SIZE: usize = 64; // recent-root window
 pub const TREE_BYTES: usize = 8224; // = size_in_account(20, 8, 64, 0), verified
 
-pub const MAX_ENCRYPTED_NOTE_LEN: usize = 512; // bounds tx/log bloat; an opening is a few fields + key + MAC
+pub const MAX_ENCRYPTED_NOTE_LEN: usize = 128;
+pub const PROOF_BYTES: usize = 388;
 
 const DISCRIMINATOR: usize = 8; // Anchor account discriminator; Light's tree lives after it
 
@@ -60,6 +61,7 @@ pub struct Pool {
     pub verifier: Pubkey,
     pub mint: Pubkey,
     pub asset_id: [u8; 32],
+    pub domain: [u8; 32],
     pub bump: u8,
 }
 
@@ -105,4 +107,6 @@ pub enum PoolError {
     NoteTooLarge,
     #[msg("amount must be greater than zero")]
     ZeroAmount,
+    #[msg("proof has an invalid length")]
+    InvalidProofLength,
 }

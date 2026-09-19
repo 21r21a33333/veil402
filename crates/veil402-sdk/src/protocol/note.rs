@@ -3,7 +3,7 @@ use solana_poseidon::{Endianness, Parameters, hashv};
 use super::{Field, Secret};
 use crate::client::Error;
 
-fn poseidon(inputs: &[&Field]) -> Result<Field, Error> {
+pub(crate) fn poseidon(inputs: &[&Field]) -> Result<Field, Error> {
     let bytes: Vec<&[u8]> = inputs
         .iter()
         .map(|field| field.as_bytes().as_slice())
@@ -51,8 +51,22 @@ pub struct Note {
 }
 
 impl Note {
-    pub(crate) fn commitment(&self, owner: &Owner) -> Result<Field, Error> {
-        let public_key = poseidon(&[&owner.public()?, &self.random.expose()])?;
+    /// Derives the note public key passed to `shield`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Poseidon`] if the configured hash rejects its inputs.
+    pub fn public_key(&self, owner: &Owner) -> Result<Field, Error> {
+        poseidon(&[&owner.public()?, &self.random.expose()])
+    }
+
+    /// Derives the note commitment inserted into the pool tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Poseidon`] if the configured hash rejects its inputs.
+    pub fn commitment(&self, owner: &Owner) -> Result<Field, Error> {
+        let public_key = self.public_key(owner)?;
         poseidon(&[&public_key, &self.asset, &Field::from(self.value)])
     }
 }

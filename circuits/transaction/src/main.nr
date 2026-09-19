@@ -20,6 +20,8 @@ fn main(
     out_commitment: pub Field,
     public_amount: pub Field,
     ext_data_hash: pub Field,
+    // Private copy forces the public hash into the constraint system.
+    bound_hash: Field,
     // Private: input note + the keys that own it.
     in_value: Field,
     asset_id: Field,
@@ -57,8 +59,8 @@ fn main(
     // Value conservation: inputs + public flow == outputs (field math covers signed withdrawals).
     assert(in_value + public_amount == out_value, "value not conserved");
 
-    // Bind the public leg (recipient / relayer / fee / ciphertext) so it can't be swapped post-proof.
-    let _ = ext_data_hash;
+    // Bind the public leg so it cannot be swapped after proving.
+    assert(ext_data_hash == bound_hash, "wrong external data hash");
 }
 
 // Table-driven test runner. Builds the standard 1-in/1-out witness (fixed secrets, in_value = 1000,
@@ -70,6 +72,7 @@ fn run_case(
     root_off: Field,
     nullifier_off: Field,
     out_commitment_off: Field,
+    ext_data_hash_off: Field,
 ) {
     let spending_key = 11;
     let viewing_key = 22;
@@ -89,6 +92,7 @@ fn run_case(
         bn254::hash_2([nk, leaf_index]) + nullifier_off,
         bn254::hash_3([out_npk, asset_id, out_value]) + out_commitment_off,
         public_amount,
+        999 + ext_data_hash_off,
         999,
         in_value,
         asset_id,
@@ -105,33 +109,38 @@ fn run_case(
 // Accepted: a private transfer (public_amount 0) and a withdrawal (negative net flow).
 #[test]
 fn transfer_1in1out() {
-    run_case(0, 1000, 0, 0, 0);
+    run_case(0, 1000, 0, 0, 0, 0);
 }
 
 #[test]
 fn withdraw_conserves() {
-    run_case(0 - 300, 700, 0, 0, 0);
+    run_case(0 - 300, 700, 0, 0, 0, 0);
 }
 
 // Rejected: each case corrupts exactly one input; the test name says which.
 #[test(should_fail_with = "value not conserved")]
 fn rejects_value_inflation() {
-    run_case(0, 1001, 0, 0, 0);
+    run_case(0, 1001, 0, 0, 0, 0);
 }
 
 #[test(should_fail_with = "wrong nullifier")]
 fn rejects_wrong_nullifier() {
-    run_case(0, 1000, 0, 1, 0);
+    run_case(0, 1000, 0, 1, 0, 0);
 }
 
 #[test(should_fail_with = "input note not in tree")]
 fn rejects_non_membership() {
-    run_case(0, 1000, 1, 0, 0);
+    run_case(0, 1000, 1, 0, 0, 0);
 }
 
 #[test(should_fail_with = "wrong output commitment")]
 fn rejects_wrong_output_commitment() {
-    run_case(0, 1000, 0, 0, 1);
+    run_case(0, 1000, 0, 0, 1, 0);
+}
+
+#[test(should_fail_with = "wrong external data hash")]
+fn rejects_wrong_external_data_hash() {
+    run_case(0, 1000, 0, 0, 0, 1);
 }
 
 #[test]

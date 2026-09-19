@@ -16,6 +16,10 @@ pub enum Error {
     #[error("invalid transaction: {0}")]
     Transaction(&'static str),
 
+    /// A withdrawal or its Solana instruction is invalid.
+    #[error("invalid withdrawal: {0}")]
+    Withdrawal(&'static str),
+
     /// The proving artifacts are missing, corrupt, or incompatible.
     #[error("invalid proving artifacts: {0}")]
     Artifacts(&'static str),

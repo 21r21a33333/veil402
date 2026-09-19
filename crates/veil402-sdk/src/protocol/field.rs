@@ -34,6 +34,11 @@ impl Field {
         Self(encoding::field_bytes(value))
     }
 
+    pub(crate) fn from_signed(value: i64) -> Self {
+        let magnitude = Fr::from(value.unsigned_abs());
+        Self::from_fr(if value < 0 { -magnitude } else { magnitude })
+    }
+
     pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }

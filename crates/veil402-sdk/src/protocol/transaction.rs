@@ -1,5 +1,3 @@
-use ark_bn254::Fr;
-
 use super::{Field, Note, Output, Owner, TREE_DEPTH, note};
 use crate::client::Error;
 
@@ -109,12 +107,7 @@ impl Transaction {
         let nullifier = note::nullifier(&self.input.owner, self.input.merkle.index)?;
         let output_key = self.send.public_key()?;
         let commitment = note::commitment(&output_key, &self.input.note.asset, self.send.value)?;
-        let magnitude = Fr::from(self.public.amount.unsigned_abs());
-        let amount = Field::from_fr(if self.public.amount < 0 {
-            -magnitude
-        } else {
-            magnitude
-        });
+        let amount = Field::from_signed(self.public.amount);
 
         Ok(Values {
             public: PublicInputs {

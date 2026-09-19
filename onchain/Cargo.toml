@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/*"]
+members = ["programs/*", "tests/e2e"]
 default-members = ["programs/pool"]
 resolver = "2"
 

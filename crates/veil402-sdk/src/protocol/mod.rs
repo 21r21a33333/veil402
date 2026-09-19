@@ -1,6 +1,6 @@
 mod encoding;
 mod field;
-mod note;
+pub(crate) mod note;
 mod transaction;
 
 pub use field::{Field, Secret};
