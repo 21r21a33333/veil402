@@ -39,13 +39,19 @@ fn main(
 
     // The input note must be a leaf under the given root.
     let in_commitment = bn254::hash_3([in_npk, asset_id, in_value]);
-    assert(merkle::compute_root(in_commitment, siblings, leaf_index) == root, "input note not in tree");
+    assert(
+        merkle::compute_root(in_commitment, siblings, leaf_index) == root,
+        "input note not in tree",
+    );
 
     // The revealed nullifier must be the one only this owner can produce for this leaf.
     assert(nullifier == bn254::hash_2([nullifying_key, leaf_index]), "wrong nullifier");
 
     // The output note must be a valid commitment to `out_value` (else conservation is meaningless).
-    assert(out_commitment == bn254::hash_3([out_npk, asset_id, out_value]), "wrong output commitment");
+    assert(
+        out_commitment == bn254::hash_3([out_npk, asset_id, out_value]),
+        "wrong output commitment",
+    );
     out_value.assert_max_bit_size::<64>();
 
     // Value conservation: inputs + public flow == outputs (field math covers signed withdrawals).
@@ -80,8 +86,20 @@ fn transfer_1in1out() {
     let out_commitment = bn254::hash_3([out_npk, asset_id, out_value]);
 
     main(
-        root, nullifier, out_commitment, 0, 999, in_value, asset_id, in_random, spending_key,
-        viewing_key, leaf_index, siblings, out_npk, out_value,
+        root,
+        nullifier,
+        out_commitment,
+        0,
+        999,
+        in_value,
+        asset_id,
+        in_random,
+        spending_key,
+        viewing_key,
+        leaf_index,
+        siblings,
+        out_npk,
+        out_value,
     );
 }
 
@@ -108,7 +126,19 @@ fn rejects_value_inflation() {
     let out_commitment = bn254::hash_3([out_npk, asset_id, out_value]);
 
     main(
-        root, nullifier, out_commitment, 0, 999, in_value, asset_id, in_random, spending_key,
-        viewing_key, leaf_index, siblings, out_npk, out_value,
+        root,
+        nullifier,
+        out_commitment,
+        0,
+        999,
+        in_value,
+        asset_id,
+        in_random,
+        spending_key,
+        viewing_key,
+        leaf_index,
+        siblings,
+        out_npk,
+        out_value,
     );
 }
