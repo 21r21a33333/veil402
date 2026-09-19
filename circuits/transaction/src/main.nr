@@ -61,35 +61,34 @@ fn main(
     let _ = ext_data_hash;
 }
 
-#[test]
-fn transfer_1in1out() {
-    // A pure private transfer: public_amount = 0, so out_value == in_value.
+// Table-driven test runner. Builds the standard 1-in/1-out witness (fixed secrets, in_value = 1000,
+// a single leaf at index 0) and runs `main`. A case sets `public_amount` / `out_value`; a non-zero
+// `*_off` corrupts that one public input to exercise a specific rejection (0 = leave it correct).
+fn run_case(
+    public_amount: Field,
+    out_value: Field,
+    root_off: Field,
+    nullifier_off: Field,
+    out_commitment_off: Field,
+) {
     let spending_key = 11;
     let viewing_key = 22;
     let in_random = 33;
     let asset_id = 1;
     let in_value = 1000;
+    let out_npk = 4242;
+    let leaf_index = 0;
+    let siblings: [Field; TREE_DEPTH] = [0; TREE_DEPTH];
 
     let nk = bn254::hash_1([viewing_key]);
     let mpk = bn254::hash_2([bn254::hash_1([spending_key]), nk]);
-    let in_npk = bn254::hash_2([mpk, in_random]);
-    let in_commitment = bn254::hash_3([in_npk, asset_id, in_value]);
-
-    // Self-consistent tree: any siblings work as long as the same ones produce the root we pass in.
-    let siblings: [Field; TREE_DEPTH] = [0; TREE_DEPTH];
-    let leaf_index = 0;
-    let root = merkle::compute_root(in_commitment, siblings, leaf_index);
-    let nullifier = bn254::hash_2([nk, leaf_index]);
-
-    let out_npk = 4242; // recipient's note public key
-    let out_value = in_value;
-    let out_commitment = bn254::hash_3([out_npk, asset_id, out_value]);
+    let in_commitment = bn254::hash_3([bn254::hash_2([mpk, in_random]), asset_id, in_value]);
 
     main(
-        root,
-        nullifier,
-        out_commitment,
-        0,
+        merkle::compute_root(in_commitment, siblings, leaf_index) + root_off,
+        bn254::hash_2([nk, leaf_index]) + nullifier_off,
+        bn254::hash_3([out_npk, asset_id, out_value]) + out_commitment_off,
+        public_amount,
         999,
         in_value,
         asset_id,
@@ -103,62 +102,48 @@ fn transfer_1in1out() {
     );
 }
 
+// Accepted: a private transfer (public_amount 0) and a withdrawal (negative net flow).
+#[test]
+fn transfer_1in1out() {
+    run_case(0, 1000, 0, 0, 0);
+}
+
+#[test]
+fn withdraw_conserves() {
+    run_case(0 - 300, 700, 0, 0, 0);
+}
+
+// Rejected: each case corrupts exactly one input; the test name says which.
 #[test(should_fail_with = "value not conserved")]
 fn rejects_value_inflation() {
-    // Same as the transfer, but the output is worth more than the input with no public inflow.
-    let spending_key = 11;
-    let viewing_key = 22;
-    let in_random = 33;
-    let asset_id = 1;
-    let in_value = 1000;
+    run_case(0, 1001, 0, 0, 0);
+}
 
-    let nk = bn254::hash_1([viewing_key]);
-    let mpk = bn254::hash_2([bn254::hash_1([spending_key]), nk]);
-    let in_npk = bn254::hash_2([mpk, in_random]);
-    let in_commitment = bn254::hash_3([in_npk, asset_id, in_value]);
-    let siblings: [Field; TREE_DEPTH] = [0; TREE_DEPTH];
-    let leaf_index = 0;
-    let root = merkle::compute_root(in_commitment, siblings, leaf_index);
-    let nullifier = bn254::hash_2([nk, leaf_index]);
+#[test(should_fail_with = "wrong nullifier")]
+fn rejects_wrong_nullifier() {
+    run_case(0, 1000, 0, 1, 0);
+}
 
-    let out_npk = 4242;
-    let out_value = in_value + 1; // minting value from nothing
-    let out_commitment = bn254::hash_3([out_npk, asset_id, out_value]);
+#[test(should_fail_with = "input note not in tree")]
+fn rejects_non_membership() {
+    run_case(0, 1000, 1, 0, 0);
+}
 
-    main(
-        root,
-        nullifier,
-        out_commitment,
-        0,
-        999,
-        in_value,
-        asset_id,
-        in_random,
-        spending_key,
-        viewing_key,
-        leaf_index,
-        siblings,
-        out_npk,
-        out_value,
-    );
+#[test(should_fail_with = "wrong output commitment")]
+fn rejects_wrong_output_commitment() {
+    run_case(0, 1000, 0, 0, 1);
 }
 
 #[test]
 fn emit_prover_toml() {
-    // Fixed transfer witness -> prints the 3 computed public inputs for Prover.toml.
-    let spending_key = 11;
-    let viewing_key = 22;
-    let in_random = 33;
-    let asset_id = 1;
-    let in_value = 1000;
-    let nk = bn254::hash_1([viewing_key]);
-    let mpk = bn254::hash_2([bn254::hash_1([spending_key]), nk]);
-    let in_npk = bn254::hash_2([mpk, in_random]);
-    let in_commitment = bn254::hash_3([in_npk, asset_id, in_value]);
+    // Prints the standard transfer's public inputs (for a gitignored Prover.toml).
+    let nk = bn254::hash_1([22]);
+    let mpk = bn254::hash_2([bn254::hash_1([11]), nk]);
+    let in_commitment = bn254::hash_3([bn254::hash_2([mpk, 33]), 1, 1000]);
     let siblings: [Field; TREE_DEPTH] = [0; TREE_DEPTH];
     let root = merkle::compute_root(in_commitment, siblings, 0);
     let nullifier = bn254::hash_2([nk, 0]);
-    let out_commitment = bn254::hash_3([4242, asset_id, in_value]);
+    let out_commitment = bn254::hash_3([4242, 1, 1000]);
     println(f"root = {root}");
     println(f"nullifier = {nullifier}");
     println(f"out_commitment = {out_commitment}");
