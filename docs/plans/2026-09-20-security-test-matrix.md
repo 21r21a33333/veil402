@@ -40,8 +40,9 @@ transaction rollback.
 ## Progress
 
 - Task 1 committed as `e875711`.
-- Task 2 implemented and verified; pending review.
-- Tasks 3-4 not started.
+- Task 2 committed as `1fad017`.
+- Task 3 implemented and verified; pending review.
+- Task 4 not started.
 
 ## Task 1 — Close field and circuit invariants
 
