@@ -3,7 +3,7 @@
 Spend one note, create one note. Proves: ownership, Merkle membership, correct nullifier, output
 well-formedness + `value < 2^64`, and value conservation `in_value + public_amount == out_value`.
 The public external-data hash is constrained to a private witness copy so it cannot be replaced
-after proving.
+after proving. The Merkle path's fixed-width bit decomposition constrains `leaf_index < 2^20`.
 
 ## Note / key shapes (finalized by this circuit)
 ```
@@ -26,7 +26,7 @@ Total 172 bytes. Verified against a real proof:
 
 ## Build
 ```bash
-nargo test                 # circuit unit tests (valid transfer + rejects value inflation)
+nargo test                 # circuit invariant and boundary matrix
 nargo compile && nargo execute witness
 SP=~/tools/sunspot/sunspot ; export GNARK_VERIFIER_BIN=~/tools/sunspot/gnark-solana/crates/verifier-bin
 cd target

@@ -8,6 +8,7 @@ use std::{
 
 use anchor_lang::{InstructionData, ToAccountMetas};
 use light_hasher::{Hasher, Poseidon};
+use num_bigint::BigUint;
 use serial_test::serial;
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -26,7 +27,7 @@ use spl_associated_token_account::{
 };
 use veil402_sdk::solana::MAX_ENCRYPTED_NOTE_LEN;
 use veil402_sdk::{
-    Config, Field, MerklePath, Note, Output, Owner, Pool as VeilPool, Secret, Spend, Veil,
+    Config, Field, MerklePath, Note, Output, Owner, Pool as VeilPool, Proof, Secret, Spend, Veil,
     Withdrawal, TREE_DEPTH,
 };
 
@@ -166,6 +167,64 @@ fn send_all(
 fn token_balance(client: &RpcClient, address: &Pubkey) -> Result<u64> {
     let account = client.get_account(address)?;
     Ok(spl_token::state::Account::unpack(&account.data)?.amount)
+}
+
+fn withdraw_instruction(
+    config: &VeilPool,
+    mint: Pubkey,
+    payer: Pubkey,
+    proof: &Proof,
+    nullifier: [u8; 32],
+    recipient: Pubkey,
+    recipient_ata: Pubkey,
+) -> Instruction {
+    let (nullifier_record, _) = Pubkey::find_program_address(
+        &[b"nullifier", config.address().as_ref(), &nullifier],
+        &pool::ID,
+    );
+    Instruction {
+        program_id: pool::ID,
+        accounts: pool::accounts::Transact {
+            pool: config.address(),
+            tree: config.tree(),
+            vault: config.vault(),
+            mint,
+            nullifier_record,
+            recipient_ata,
+            verifier_program: VERIFIER,
+            payer,
+            token_program: spl_token::id(),
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None),
+        data: pool::instruction::Transact {
+            proof: proof.bytes.clone(),
+            root: proof.public.root.to_bytes(),
+            nullifier,
+            out_commitment: proof.public.commitment.to_bytes(),
+            ext_amount: -300,
+            ext_data: pool::ExtData {
+                recipient,
+                encrypted_note: vec![2; MAX_ENCRYPTED_NOTE_LEN],
+            },
+        }
+        .data(),
+    }
+}
+
+fn add_scalar_modulus(value: [u8; 32]) -> Result<[u8; 32]> {
+    let modulus = BigUint::parse_bytes(
+        b"21888242871839275222246405745257275088548364400416034343698204186575808495617",
+        10,
+    )
+    .ok_or("BN254 scalar modulus is invalid")?;
+    let encoded = (BigUint::from_bytes_be(&value) + modulus).to_bytes_be();
+    if encoded.len() > 32 {
+        return Err("non-canonical nullifier exceeds 32 bytes".into());
+    }
+    let mut bytes = [0; 32];
+    bytes[32 - encoded.len()..].copy_from_slice(&encoded);
+    Ok(bytes)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -312,7 +371,7 @@ async fn withdrawal_is_bound_and_single_use() -> Result<()> {
     let withdrawal = Withdrawal::new(recipient.pubkey(), 300, vec![2; MAX_ENCRYPTED_NOTE_LEN])?;
     let veil = Veil::open(Config::new(
         worker,
-        repository.join("prover/veil402-gnark/artifacts/transaction-v2"),
+        repository.join("prover/veil402-gnark/artifacts/transaction-v3"),
     ))?;
     let prepared = veil
         .withdraw(
@@ -332,54 +391,75 @@ async fn withdrawal_is_bound_and_single_use() -> Result<()> {
         )
         .await?;
 
-    let (nullifier_record, _) = Pubkey::find_program_address(
-        &[
-            b"nullifier",
-            pool.address().as_ref(),
-            prepared.proof.public.nullifier.to_bytes().as_ref(),
-        ],
-        &pool::ID,
+    let tree_before = client.get_account_data(&pool.tree())?;
+    let nullifier = prepared.proof.public.nullifier.to_bytes();
+    let tampered = withdraw_instruction(
+        &pool,
+        mint,
+        payer.pubkey(),
+        &prepared.proof,
+        nullifier,
+        attacker.pubkey(),
+        attacker_ata,
     );
-    let tampered = Instruction {
-        program_id: pool::ID,
-        accounts: pool::accounts::Transact {
-            pool: pool.address(),
-            tree: pool.tree(),
-            vault: pool.vault(),
-            mint,
-            nullifier_record,
-            recipient_ata: attacker_ata,
-            verifier_program: VERIFIER,
-            payer: payer.pubkey(),
-            token_program: spl_token::id(),
-            system_program: system_program::id(),
-        }
-        .to_account_metas(None),
-        data: pool::instruction::Transact {
-            proof: prepared.proof.bytes.clone(),
-            root: prepared.proof.public.root.to_bytes(),
-            nullifier: prepared.proof.public.nullifier.to_bytes(),
-            out_commitment: prepared.proof.public.commitment.to_bytes(),
-            ext_amount: -300,
-            ext_data: pool::ExtData {
-                recipient: attacker.pubkey(),
-                encrypted_note: vec![2; MAX_ENCRYPTED_NOTE_LEN],
-            },
-        }
-        .data(),
-    };
     if send(&client, tampered, &payer, 3).is_ok() {
         return Err("proof accepted a mutated recipient".into());
     }
-    if token_balance(&client, &pool.vault())? != 1_000 {
-        return Err("failed withdrawal changed the vault".into());
+
+    let non_canonical = add_scalar_modulus(nullifier)?;
+    let non_canonical_record = Pubkey::find_program_address(
+        &[b"nullifier", pool.address().as_ref(), &non_canonical],
+        &pool::ID,
+    )
+    .0;
+    let altered = withdraw_instruction(
+        &pool,
+        mint,
+        payer.pubkey(),
+        &prepared.proof,
+        non_canonical,
+        recipient.pubkey(),
+        recipient_ata,
+    );
+    if send(&client, altered, &payer, 4).is_ok() {
+        return Err("non-canonical nullifier was accepted".into());
+    }
+    if client.get_account(&non_canonical_record).is_ok() {
+        return Err("failed nullifier validation left a PDA behind".into());
     }
 
-    send(&client, prepared.instruction.clone(), &payer, 4)?;
+    let zero_record = Pubkey::find_program_address(
+        &[b"nullifier", pool.address().as_ref(), &[0; 32]],
+        &pool::ID,
+    )
+    .0;
+    let zero = withdraw_instruction(
+        &pool,
+        mint,
+        payer.pubkey(),
+        &prepared.proof,
+        [0; 32],
+        recipient.pubkey(),
+        recipient_ata,
+    );
+    if send(&client, zero, &payer, 5).is_ok() {
+        return Err("zero nullifier was accepted".into());
+    }
+    if client.get_account(&zero_record).is_ok() {
+        return Err("failed zero-nullifier validation left a PDA behind".into());
+    }
+
+    if token_balance(&client, &pool.vault())? != 1_000
+        || client.get_account_data(&pool.tree())? != tree_before
+    {
+        return Err("failed withdrawal changed pool state".into());
+    }
+
+    send(&client, prepared.instruction.clone(), &payer, 6)?;
     assert_eq!(token_balance(&client, &recipient_ata)?, 300);
     assert_eq!(token_balance(&client, &pool.vault())?, 700);
 
-    if send(&client, prepared.instruction, &payer, 5).is_ok() {
+    if send(&client, prepared.instruction, &payer, 7).is_ok() {
         return Err("spent nullifier was accepted twice".into());
     }
     assert_eq!(token_balance(&client, &recipient_ata)?, 300);

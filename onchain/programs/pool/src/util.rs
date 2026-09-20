@@ -16,6 +16,11 @@ pub fn keccak_field(vals: &[&[u8]]) -> [u8; 32] {
     field_bytes(Fr::from_be_bytes_mod_order(&keccak::hashv(vals).to_bytes()))
 }
 
+/// Whether bytes are the unique big-endian encoding of a BN254 scalar.
+pub fn is_canonical_field(bytes: &[u8; 32]) -> bool {
+    field_bytes(Fr::from_be_bytes_mod_order(bytes)) == *bytes
+}
+
 /// A u64 as a 32-byte big-endian field element.
 pub fn u64_be32(x: u64) -> [u8; 32] {
     let mut b = [0u8; 32];
@@ -46,4 +51,20 @@ fn field_bytes(value: Fr) -> [u8; 32] {
     let mut out = [0u8; 32];
     out.copy_from_slice(&value.into_bigint().to_bytes_be());
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_encoding_is_canonical_below_the_modulus_only() {
+        assert!(is_canonical_field(&[0; 32]));
+        assert!(is_canonical_field(&field_bytes(Fr::from(u64::MAX))));
+
+        let modulus = Fr::MODULUS.to_bytes_be();
+        let mut encoded = [0; 32];
+        encoded[32 - modulus.len()..].copy_from_slice(&modulus);
+        assert!(!is_canonical_field(&encoded));
+    }
 }

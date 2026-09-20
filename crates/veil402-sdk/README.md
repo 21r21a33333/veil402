@@ -11,5 +11,5 @@ let prepared = veil
 ```
 
 The public API does not expose Noir, Sunspot, worker-protocol, or temporary-file concerns. The
-current `transaction-v2` artifact implements the bound 1-in/1-out transaction circuit. Advanced
+current `transaction-v3` artifact implements the bound 1-in/1-out transaction circuit. Advanced
 callers can still use `Veil::prove` directly.

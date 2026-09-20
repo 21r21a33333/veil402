@@ -57,7 +57,7 @@ fn root() -> Result<&'static Path, Box<dyn StdError>> {
 }
 
 fn artifacts() -> Result<std::path::PathBuf, Box<dyn StdError>> {
-    Ok(root()?.join("prover/veil402-gnark/artifacts/transaction-v2"))
+    Ok(root()?.join("prover/veil402-gnark/artifacts/transaction-v3"))
 }
 
 #[test]
@@ -79,20 +79,61 @@ fn protocol_vector() -> Result<(), Box<dyn StdError>> {
 fn rejects_corrupt_artifacts() -> Result<(), Box<dyn StdError>> {
     let directory = tempdir()?;
     let source = artifacts()?;
-    let manifest = fs::read_to_string(source.join("manifest.json"))?.replace(
-        "5304e0ba5ea00037b9b2e6903b0be89fb29a7ed7db85778758ad5ce50833216a",
-        "0000000000000000000000000000000000000000000000000000000000000000",
-    );
-    fs::write(directory.path().join("manifest.json"), manifest)?;
     fs::copy(
-        source.join("transaction.json"),
-        directory.path().join("transaction.json"),
+        source.join("manifest.json"),
+        directory.path().join("manifest.json"),
     )?;
+    let mut program = fs::read(source.join("transaction.json"))?;
+    let first = program
+        .first_mut()
+        .ok_or("compiled circuit artifact is empty")?;
+    *first ^= 1;
+    fs::write(directory.path().join("transaction.json"), program)?;
 
     let Err(error) = Veil::open(Config::new("unused", directory.path())) else {
         return Err("corrupt artifact was accepted".into());
     };
     assert!(matches!(error, Error::Artifacts(_)));
+    Ok(())
+}
+
+#[test]
+fn rejects_leaf_index_outside_the_tree() -> Result<(), Box<dyn StdError>> {
+    let mut transaction = transaction()?;
+    transaction.input.merkle.index = 1_u32 << TREE_DEPTH;
+
+    assert!(matches!(
+        transaction.inputs(),
+        Err(Error::Transaction("leaf index exceeds tree capacity"))
+    ));
+    Ok(())
+}
+
+#[test]
+fn merkle_index_vectors_match() -> Result<(), Box<dyn StdError>> {
+    let cases = [
+        (
+            0,
+            "265d84ab109b9a6a4c1dedc0219829a4c04621d7ceb3d6cd55ecb99f75b687ad",
+        ),
+        (
+            1,
+            "2d668e1d9f7f441c362635c4321ffc32e416886997abcd04fe98a0febce44df9",
+        ),
+        (
+            1 << 19,
+            "168a9189699777c51dad5935c36dec7c5ac33fd206747c1733397dc6eb269ffc",
+        ),
+        (
+            (1 << 20) - 1,
+            "23f08697121c787e847a4a91b9d1522f4484d6647427120c14d19157a6c18278",
+        ),
+    ];
+    for (index, expected) in cases {
+        let mut transaction = transaction()?;
+        transaction.input.merkle.index = index;
+        assert_eq!(transaction.inputs()?.root, vector(expected)?);
+    }
     Ok(())
 }
 
@@ -117,7 +158,7 @@ async fn proves_and_verifies_locally() -> Result<(), Box<dyn StdError>> {
         let proof = veil.prove(transaction).await?;
         assert_eq!(proof.bytes.len(), 388);
         assert_eq!(proof.public, expected);
-        assert_eq!(proof.artifact, "transaction-v2");
+        assert_eq!(proof.artifact, "transaction-v3");
     }
     Ok(())
 }

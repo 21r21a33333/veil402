@@ -82,6 +82,9 @@ impl Pool {
     }
 
     pub(crate) fn bind(&self, withdrawal: &Withdrawal) -> Result<Field, Error> {
+        if withdrawal.recipient == self.address {
+            return Err(Error::Withdrawal("recipient resolves to the pool vault"));
+        }
         binding::withdrawal(self, withdrawal)
     }
 
@@ -155,4 +158,26 @@ pub struct Prepared {
     pub proof: Proof,
     /// Ready-to-sign pool transaction instruction.
     pub instruction: Instruction,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_pool_as_withdrawal_recipient() -> Result<(), Error> {
+        let pool = Pool::new(
+            Pubkey::new_from_array([1; 32]),
+            Pubkey::new_from_array([2; 32]),
+            Pubkey::new_from_array([3; 32]),
+            [4; 32],
+        )?;
+        let withdrawal = Withdrawal::new(pool.address(), 1, Vec::new())?;
+
+        assert!(matches!(
+            pool.bind(&withdrawal),
+            Err(Error::Withdrawal("recipient resolves to the pool vault"))
+        ));
+        Ok(())
+    }
 }

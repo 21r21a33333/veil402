@@ -42,7 +42,8 @@ remaining in the vault.
   verifies it by CPI, transfers the withdrawal, records the nullifier, and
   inserts the output commitment atomically.
 - The verifier account must be executable and match the configured verifier.
-- Proof and encrypted-note lengths are bounded before CPI.
+- Proof and encrypted-note lengths, canonical public fields, zero nullifiers,
+  and vault self-transfers are rejected before CPI.
 
 ## Acceptance
 

@@ -19,14 +19,16 @@ is specified in [withdrawal-integration.md](2026-09-19-withdrawal-integration.md
 1. `init_pool(domain)` stores authority, verifier, mint, derived asset field,
    deployment domain, and initializes the tree and vault.
 2. `shield(npk, amount, encrypted_note)` transfers tokens into the vault,
-   derives `Poseidon(npk, asset, amount)`, and appends it.
+   rejects non-canonical `npk`, derives `Poseidon(npk, asset, amount)`, and
+   appends it.
 3. `transact(...)` accepts only non-positive public flow, checks a recent root,
-   recomputes the canonical external-data binding, verifies the proof, pays the
-   recipient, records the nullifier, and appends the output atomically.
+   rejects non-canonical public fields and a zero nullifier, recomputes the
+   external-data binding, verifies the proof, pays a non-vault recipient,
+   records the nullifier, and appends the output atomically.
 
 ## Limits
 
-- Proof: exactly 388 bytes for the pinned `transaction-v2` artifact.
+- Proof: exactly 388 bytes for the pinned `transaction-v3` artifact.
 - Encrypted note: at most 128 bytes so the legacy Solana transaction remains
   below the 1232-byte packet limit.
 - Compute: the verifier measures about 456K CU; clients should request about

@@ -97,6 +97,10 @@ impl Transaction {
     }
 
     pub(crate) fn values(&self) -> Result<Values, Error> {
+        if u64::from(self.input.merkle.index) >= (1_u64 << TREE_DEPTH) {
+            return Err(Error::Transaction("leaf index exceeds tree capacity"));
+        }
+
         let value = i128::from(self.input.note.value) + i128::from(self.public.amount);
         if value != i128::from(self.send.value) {
             return Err(Error::Transaction("value is not conserved"));

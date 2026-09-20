@@ -4096,6 +4096,7 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "light-hasher",
+ "num-bigint 0.4.8",
  "pool",
  "serial_test",
  "solana-client",

@@ -110,6 +110,7 @@ pub mod pool {
         encrypted_note: Vec<u8>,
     ) -> Result<()> {
         require!(amount > 0, PoolError::ZeroAmount);
+        require!(util::is_canonical_field(&npk), PoolError::InvalidField);
         require!(
             encrypted_note.len() <= MAX_ENCRYPTED_NOTE_LEN,
             PoolError::NoteTooLarge
@@ -152,9 +153,23 @@ pub mod pool {
         require!(ext_amount <= 0, PoolError::ExtAmountMustBeNonPositive);
         require!(proof.len() == PROOF_BYTES, PoolError::InvalidProofLength);
         require!(
+            util::is_canonical_field(&root)
+                && util::is_canonical_field(&nullifier)
+                && util::is_canonical_field(&out_commitment),
+            PoolError::InvalidField
+        );
+        require!(nullifier != [0; 32], PoolError::ZeroNullifier);
+        require!(
             ext_data.encrypted_note.len() <= MAX_ENCRYPTED_NOTE_LEN,
             PoolError::NoteTooLarge
         );
+        if ext_amount < 0 {
+            require_keys_neq!(
+                ctx.accounts.recipient_ata.key(),
+                ctx.accounts.vault.key(),
+                PoolError::SelfTransfer
+            );
+        }
 
         // 1. Known root (from the tree's history) + correct verifier.
         require!(

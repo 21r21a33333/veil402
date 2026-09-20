@@ -109,4 +109,10 @@ pub enum PoolError {
     ZeroAmount,
     #[msg("proof has an invalid length")]
     InvalidProofLength,
+    #[msg("field element is not canonically encoded")]
+    InvalidField,
+    #[msg("nullifier must not be zero")]
+    ZeroNullifier,
+    #[msg("withdrawal recipient must not be the pool vault")]
+    SelfTransfer,
 }
