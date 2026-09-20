@@ -4,13 +4,14 @@ use anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas};
 use light_hasher::{Hasher, Poseidon};
 use num_bigint::BigUint;
 use pool_e2e::harness::{
-    airdrop, create_mint, create_token_account, mint_to, repository, send, token_balance, Result,
-    Validator,
+    airdrop, create_mint, create_token_account, mint_to, repository, send, send_with_signature,
+    token_balance, Result, Validator,
 };
 use serial_test::serial;
-use solana_client::rpc_client::RpcClient;
+use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
 use solana_keccak_hasher::hashv;
 use solana_sdk::{
+    commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     native_token::LAMPORTS_PER_SOL,
@@ -19,6 +20,9 @@ use solana_sdk::{
     transaction::Transaction as SolanaTransaction,
 };
 use solana_system_interface::program as system_program;
+use solana_transaction_status_client_types::{
+    option_serializer::OptionSerializer, UiTransactionEncoding,
+};
 use spl_associated_token_account::get_associated_token_address;
 use veil402_sdk::solana::MAX_ENCRYPTED_NOTE_LEN;
 use veil402_sdk::{
@@ -28,6 +32,8 @@ use veil402_sdk::{
 
 const VERIFIER: Pubkey = Pubkey::from_str_const("9jpnLceL3ahFfi5JmXdXNT1rZ1zLmfUcBkKbqCvquo19");
 const DOMAIN: [u8; 32] = [7; 32];
+// Baseline: 544,150 units on Solana 3.1.12; 55,850 units (10.3%) headroom.
+const COMPUTE_CEILING: u64 = 600_000;
 
 fn field(value: u64) -> Field {
     Field::from(value)
@@ -524,9 +530,29 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
     assert!(packet_bytes <= solana_sdk::packet::PACKET_DATA_SIZE);
 
     // The unmodified proof pays exactly 300 and leaves 700 in the vault.
-    send(&client, prepared.instruction.clone(), &payer, nonce)?;
+    let signature = send_with_signature(&client, prepared.instruction.clone(), &payer, nonce)?;
     assert_eq!(token_balance(&client, &recipient_ata)?, 300);
     assert_eq!(token_balance(&client, &pool.vault())?, 700);
+    let transaction = client.get_transaction_with_config(
+        &signature,
+        RpcTransactionConfig {
+            encoding: Some(UiTransactionEncoding::Json),
+            commitment: Some(CommitmentConfig::confirmed()),
+            max_supported_transaction_version: Some(0),
+        },
+    )?;
+    let meta = transaction
+        .transaction
+        .meta
+        .ok_or("successful transaction has no metadata")?;
+    let compute_units = match meta.compute_units_consumed {
+        OptionSerializer::Some(units) => units,
+        OptionSerializer::None | OptionSerializer::Skip => {
+            return Err("successful transaction has no compute measurement".into());
+        }
+    };
+    eprintln!("real verifier compute units: {compute_units}");
+    assert!(compute_units <= COMPUTE_CEILING);
     nonce += 1;
 
     // Replaying the identical instruction must fail on the existing nullifier

@@ -200,6 +200,10 @@ impl Fixture {
         })
     }
 
+    pub fn rpc_url(&self) -> &str {
+        self._validator.rpc_url()
+    }
+
     pub fn shield(&mut self, npk: [u8; 32], amount: u64, encrypted_note: Vec<u8>) -> Result<()> {
         self.submit(shield_instruction(
             &self.config,

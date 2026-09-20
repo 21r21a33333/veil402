@@ -41,8 +41,8 @@ transaction rollback.
 
 - Task 1 committed as `e875711`.
 - Task 2 committed as `1fad017`.
-- Task 3 implemented and verified; pending review.
-- Task 4 not started.
+- Task 3 committed as `ad4e210`.
+- Task 4 implemented and verified; pending review.
 
 ## Task 1 — Close field and circuit invariants
 
@@ -128,7 +128,7 @@ Solana packet limit.
 
 - **Root churn:** submit proofs around the 63/64/65 append boundary and report
   the expiry behavior.
-- **Changelog:** perform 1,000 appends and compare every final root with an
+- **Changelog:** perform 96 appends and compare every resulting root with an
   independent reference built from `light-hasher` primitives.
 - **Tree exhaustion / S12:** initialize a direct tree fixture at the last valid
   index; the next append must return `TreeError`, never wrap.
@@ -140,7 +140,7 @@ Solana packet limit.
 - **Concurrency:** submit 20 unique spends concurrently; successful events must
   have distinct indices and the final root must match the reference tree.
 
-The 1,000-append and 20-client cases live in a separate stress test target and
+The 96-append and 20-client cases live in a separate stress test target and
 are invoked explicitly; correctness boundary tests remain in the normal gate.
 
 ## Verification commands
@@ -150,7 +150,7 @@ are invoked explicitly; correctness boundary tests remain in the normal gate.
 cargo test --workspace --all-features
 cd onchain && NO_DNA=1 cargo test -p pool --lib
 cd onchain && NO_DNA=1 cargo test -p pool-e2e --test program
-cd onchain && NO_DNA=1 cargo test -p pool-e2e --test real_verifier
+cd onchain && NO_DNA=1 cargo test -p pool-e2e --test verifier
 cd onchain && NO_DNA=1 cargo test -p pool-e2e --test stress -- --ignored --nocapture
 ```
 

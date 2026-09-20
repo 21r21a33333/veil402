@@ -15,7 +15,7 @@ use solana_sdk::{
     instruction::Instruction,
     program_pack::Pack,
     pubkey::Pubkey,
-    signature::{Keypair, Signer},
+    signature::{Keypair, Signature, Signer},
     transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
@@ -94,6 +94,10 @@ impl Validator {
     pub fn client(&self) -> RpcClient {
         RpcClient::new_with_commitment(self.rpc_url.clone(), CommitmentConfig::confirmed())
     }
+
+    pub fn rpc_url(&self) -> &str {
+        &self.rpc_url
+    }
 }
 
 impl Drop for Validator {
@@ -123,7 +127,16 @@ pub fn send(
     payer: &Keypair,
     nonce: u64,
 ) -> Result<()> {
-    send_all(
+    send_with_signature(client, instruction, payer, nonce).map(|_| ())
+}
+
+pub fn send_with_signature(
+    client: &RpcClient,
+    instruction: Instruction,
+    payer: &Keypair,
+    nonce: u64,
+) -> Result<Signature> {
+    send_all_with_signature(
         client,
         &[
             ComputeBudgetInstruction::set_compute_unit_limit(650_000),
@@ -141,11 +154,19 @@ pub fn send_all(
     payer: &Keypair,
     signers: &[&Keypair],
 ) -> Result<()> {
+    send_all_with_signature(client, instructions, payer, signers).map(|_| ())
+}
+
+pub fn send_all_with_signature(
+    client: &RpcClient,
+    instructions: &[Instruction],
+    payer: &Keypair,
+    signers: &[&Keypair],
+) -> Result<Signature> {
     let blockhash = client.get_latest_blockhash()?;
     let transaction =
         Transaction::new_signed_with_payer(instructions, Some(&payer.pubkey()), signers, blockhash);
-    client.send_and_confirm_transaction(&transaction)?;
-    Ok(())
+    Ok(client.send_and_confirm_transaction(&transaction)?)
 }
 
 pub fn token_balance(client: &RpcClient, address: &Pubkey) -> Result<u64> {

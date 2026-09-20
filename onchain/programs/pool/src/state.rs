@@ -38,7 +38,8 @@ pub fn append_leaf(account: &AccountInfo, leaf: &[u8; 32]) -> Result<u64> {
     let mut data = account.try_borrow_mut_data()?;
     let mut t = CmtMut::from_bytes_zero_copy_mut(&mut data[DISCRIMINATOR..])
         .map_err(|_| error!(PoolError::TreeError))?;
-    let (leaf_index, _seq) = t.append(leaf).map_err(|_| error!(PoolError::TreeError))?;
+    let leaf_index = t.next_index();
+    t.append(leaf).map_err(|_| error!(PoolError::TreeError))?;
     Ok(leaf_index as u64)
 }
 
@@ -115,4 +116,56 @@ pub enum PoolError {
     ZeroNullifier,
     #[msg("withdrawal recipient must not be the pool vault")]
     SelfTransfer,
+}
+
+#[cfg(test)]
+mod tests {
+    use core::mem::size_of;
+
+    use anchor_lang::{error::Error, prelude::AccountInfo};
+
+    use super::*;
+
+    #[test]
+    fn final_leaf_succeeds_and_tree_exhaustion_never_wraps() -> Result<()> {
+        let key = Pubkey::new_unique();
+        let owner = crate::ID;
+        let mut lamports = 0;
+        let mut data = vec![0; DISCRIMINATOR + TREE_BYTES];
+        let account = AccountInfo::new(
+            &key,
+            false,
+            true,
+            &mut lamports,
+            &mut data,
+            &owner,
+            false,
+            0,
+        );
+        init_tree(&account)?;
+
+        // Light's zero-copy header is repr(C): height, canopy depth, then the
+        // next leaf index. Move the fixture directly to the final valid slot;
+        // iterating through 2^20 leaves would test time, not boundary behavior.
+        let next_index_offset = DISCRIMINATOR + 2 * size_of::<usize>();
+        let final_index = (1_usize << TREE_HEIGHT) - 1;
+        account.try_borrow_mut_data()?[next_index_offset..next_index_offset + size_of::<usize>()]
+            .copy_from_slice(&final_index.to_le_bytes());
+
+        assert_eq!(append_leaf(&account, &[1; 32])?, final_index as u64);
+        let error = match append_leaf(&account, &[2; 32]) {
+            Ok(_) => return Err(error!(PoolError::TreeError)),
+            Err(error) => error,
+        };
+        match error {
+            Error::AnchorError(error) => assert_eq!(error.error_name, "TreeError"),
+            error => return Err(error),
+        }
+
+        let data = account.try_borrow_data()?;
+        let tree = Cmt::from_bytes_zero_copy(&data[DISCRIMINATOR..])
+            .map_err(|_| error!(PoolError::TreeError))?;
+        assert_eq!(tree.next_index(), 1 << TREE_HEIGHT);
+        Ok(())
+    }
 }
