@@ -7,17 +7,20 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
-[dev-dependencies]
+[dependencies]
 anchor-lang = "0.32.1"
+light-concurrent-merkle-tree = { git = "https://github.com/Lightprotocol/light-protocol", rev = "790d01afd6c191e1e6d77479e4e20192ca09ca87" }
 light-hasher = { git = "https://github.com/Lightprotocol/light-protocol", rev = "790d01afd6c191e1e6d77479e4e20192ca09ca87" }
-num-bigint = "0.4"
 pool = { path = "../../programs/pool", features = ["no-entrypoint"] }
-serial_test = "3"
 solana-client = "2.3"
 solana-sdk = "2.3"
 solana-system-interface = { version = "1", features = ["bincode"] }
 spl-associated-token-account = "7"
 spl-token = "8"
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 veil402-sdk = { path = "../../../crates/veil402-sdk" }
+
+[dev-dependencies]
+num-bigint = "0.4"
+serial_test = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -3445,6 +3445,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mock-verifier"
+version = "0.1.0"
+dependencies = [
+ "solana-program",
+]
+
+[[package]]
 name = "msgpack_tagged"
 version = "1.0.0-beta.20"
 source = "git+https://github.com/noir-lang/noir?rev=c57152f91260ecdb9faad4efc20abb14b6d2ece7#c57152f91260ecdb9faad4efc20abb14b6d2ece7"
@@ -4095,6 +4102,7 @@ name = "pool-e2e"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
+ "light-concurrent-merkle-tree",
  "light-hasher",
  "num-bigint 0.4.8",
  "pool",

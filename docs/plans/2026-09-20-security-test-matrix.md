@@ -39,8 +39,9 @@ transaction rollback.
 
 ## Progress
 
-- Task 1 implemented and verified; pending review.
-- Tasks 2-4 not started.
+- Task 1 committed as `e875711`.
+- Task 2 implemented and verified; pending review.
+- Tasks 3-4 not started.
 
 ## Task 1 — Close field and circuit invariants
 
@@ -96,10 +97,11 @@ validator process per table row.
   always-success verifier, and exact proof-length boundaries
   `0/387/388/389` with rollback checks.
 - **Nullifiers N1-N3, N6-N8:** first spend, replay, same nullifier with changed
-  output, deployment-scoped PDA derivation, two distinct spends in one
-  transaction, and duplicate spend rollback. N6 is an address/isolation test
-  because the current program intentionally supports only one pool per program
-  deployment.
+  output, deployment-scoped PDA derivation, and two distinct sequential spends.
+  N6 is an address/isolation test because the current program intentionally
+  supports only one pool per program deployment. N7/N8 cannot be represented
+  as one Solana transaction: two instructions carrying 388-byte proofs exceed
+  the 1,232-byte packet limit, so replay rollback is tested per transaction.
 - **Withdrawals W1-W8:** exact payout, insufficient vault rollback, wrong owner,
   wrong mint, frozen account rollback, vault self-transfer rejection, inert
   zero-flow recipient, and exact vault drain.
