@@ -80,7 +80,7 @@ flowchart LR
   that leaf index, the output commitment is well-formed with `value < 2^64`, **value is conserved**
   (`in_value + public_amount == out_value`), and the external data is bound.
 - **Verifier.** The proof is verified **on-chain via CPI** into a Groth16 verifier program generated
-  by [Sunspot](https://github.com/warp-id/sunspot) (BN254, ~125K CU). The pool program **assembles
+  by [Sunspot](https://github.com/warp-id/sunspot) (BN254, ~544K CU measured locally). The pool program **assembles
   the public witness itself** from values it has already checked — it never trusts a client-supplied
   witness blob.
 - **Pool program (Anchor).** `shield` and `transact` instructions; commitments stored in
@@ -103,10 +103,10 @@ nullifier      = Poseidon(nullifying_key, leaf_index)                 # bound to
 
 **Public inputs** (1-in / 1-out): `[ root, nullifier, out_commitment, public_amount, ext_data_hash ]`.
 
-- `public_amount` is the signed net public flow (`ext_amount − fee`), field-encoded (`x` for `x ≥ 0`,
+- `public_amount` is the signed public flow (`ext_amount`), field-encoded (`x` for `x ≥ 0`,
   else `P − |x|`); `0` for a pure private transfer, negative for a withdrawal.
-- `ext_data_hash` binds the public leg (recipient, fee, ciphertext) into the proof so it cannot be
-  swapped after proving.
+- `ext_data_hash` binds the deployment domain, program, pool, mint, signed amount, recipient, and
+  ciphertext into the proof so none can be swapped after proving.
 - Tree depth **20** (~1M leaves), **64-root** recent-root window.
 
 ## Security model
@@ -116,7 +116,7 @@ Veil402's `transact` follows the canonical shielded-pool flow shared by **Tornad
 known-root check → nullifier unspent guard → bind external data into a public input → verify the
 proof → mark spent → move tokens → insert output commitment → emit events for indexers.
 
-The contract and circuit were **audited end-to-end against those references**, which hardened the
+The contract and circuit were **reviewed end-to-end against those references**, which hardened the
 current implementation:
 
 - `mint` is pinned to `pool.mint` on both `shield` and `transact` (prevents fake-collateral drains).
@@ -127,7 +127,7 @@ current implementation:
 - Nullifier PDAs are pool-scoped; the note ciphertext is length-capped.
 
 **Known gaps / deferred (documented, not yet implemented):** relayer-fee payout leg and inbound
-deposit-via-transact (arrive with n-in/m-out; a nonzero `fee` is currently absorbed by the vault),
+deposit-via-transact (arrive with n-in/m-out),
 encrypted-note discovery (FMD/OMR — trial-decryption for the MVP), and compliance proofs
 (RAILGUN-style proof-of-innocence). **This code has not been independently audited — do not use it
 with real funds.**

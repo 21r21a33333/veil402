@@ -1,5 +1,6 @@
 [workspace]
-members = ["programs/*"]
+members = ["programs/*", "tests/e2e", "tests/mock-verifier"]
+default-members = ["programs/pool"]
 resolver = "2"
 
 [profile.release]

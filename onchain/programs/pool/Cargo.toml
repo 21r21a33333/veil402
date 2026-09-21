@@ -20,13 +20,14 @@ custom-heap = []
 custom-panic = []
 
 [dependencies]
-anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+anchor-lang = "0.32.1"
 anchor-spl = "0.32.1"
 solana-poseidon = "2"
+solana-keccak-hasher = "2.2.1"
 # Audited Poseidon Merkle tree (Light Protocol), reused as-is; convention verified byte-identical to
-# our circuit. Git dep (not on crates.io); pin a rev before production.
-light-hasher = { git = "https://github.com/Lightprotocol/light-protocol", branch = "main" }
-light-concurrent-merkle-tree = { git = "https://github.com/Lightprotocol/light-protocol", branch = "main" }
+# our circuit.
+light-hasher = { git = "https://github.com/Lightprotocol/light-protocol", rev = "790d01afd6c191e1e6d77479e4e20192ca09ca87" }
+light-concurrent-merkle-tree = { git = "https://github.com/Lightprotocol/light-protocol", rev = "790d01afd6c191e1e6d77479e4e20192ca09ca87" }
 ark-bn254 = "0.5"
 ark-ff = "0.5"
 

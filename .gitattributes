@@ -1,0 +1,4 @@
+# Proving artifacts are public binary release inputs; keep them out of text diffs and merges.
+prover/veil402-gnark/artifacts/**/*.ccs binary
+prover/veil402-gnark/artifacts/**/*.pk binary
+prover/veil402-gnark/artifacts/**/*.vk binary

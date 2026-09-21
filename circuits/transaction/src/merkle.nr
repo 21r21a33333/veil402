@@ -9,6 +9,7 @@ pub fn compute_root<let DEPTH: u32>(
     siblings: [Field; DEPTH],
     leaf_index: Field,
 ) -> Field {
+    // Noir's fixed-width decomposition also constrains the value to DEPTH bits.
     let bits: [bool; DEPTH] = leaf_index.to_le_bits();
     let mut node = leaf;
     for i in 0..DEPTH {

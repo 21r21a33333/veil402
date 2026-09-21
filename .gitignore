@@ -13,6 +13,15 @@ payer*.json
 *.pw
 *.so
 
+# Only the pinned public bundle belongs in Git; generated witnesses/proofs stay ignored.
+prover/veil402-gnark/artifacts/**
+!prover/veil402-gnark/artifacts/transaction-v3/
+!prover/veil402-gnark/artifacts/transaction-v3/manifest.json
+!prover/veil402-gnark/artifacts/transaction-v3/transaction.json
+!prover/veil402-gnark/artifacts/transaction-v3/transaction.ccs
+!prover/veil402-gnark/artifacts/transaction-v3/transaction.pk
+!prover/veil402-gnark/artifacts/transaction-v3/transaction.vk
+
 # Node
 **/node_modules/
 **/package-lock.json

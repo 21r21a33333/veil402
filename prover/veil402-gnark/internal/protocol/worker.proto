@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package veil402.worker.v1;
+
+option go_package = "github.com/veil402/veil402/prover/veil402-gnark/internal/protocol;protocol";
+
+message Ready {
+  uint32 protocol = 1;
+  string artifact = 2;
+}
+
+message Request {
+  uint64 id = 1;
+  bytes witness = 2;
+}
+
+message Response {
+  uint64 id = 1;
+  bytes proof = 2;
+  bytes public = 3;
+  Failure failure = 4;
+}
+
+enum Failure {
+  FAILURE_UNSPECIFIED = 0;
+  FAILURE_PROVE_FAILED = 1;
+}
