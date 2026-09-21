@@ -88,7 +88,7 @@ impl Output {
     }
 }
 
-pub(crate) fn commitment(key: &Field, asset: &Field, value: u64) -> Result<Field, Error> {
+pub(crate) fn commitment_from_key(key: &Field, asset: &Field, value: u64) -> Result<Field, Error> {
     poseidon(&[key, asset, &Field::from(value)])
 }
 

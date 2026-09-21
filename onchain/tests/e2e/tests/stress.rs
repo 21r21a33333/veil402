@@ -1,31 +1,23 @@
-use std::{
-    thread,
-    time::{Duration, Instant},
-};
+use std::thread;
 
 use anchor_lang::prelude::borsh;
 use anchor_lang::AnchorDeserialize;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use light_hasher::{Hasher, Poseidon};
 use pool_e2e::{
-    harness::{mint_to, repository, tree_state, Result},
+    harness::{confirmed_transaction, mint_to, tree_state, Result},
     scenario::{field, transact_instruction, Fixture},
 };
 use serial_test::serial;
-use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
+use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
     signature::{Signature, Signer},
     transaction::Transaction as SolanaTransaction,
 };
-use solana_transaction_status_client_types::{
-    option_serializer::OptionSerializer, UiTransactionEncoding,
-};
+use solana_transaction_status_client_types::option_serializer::OptionSerializer;
 
-const MOCK_VERIFIER: solana_sdk::pubkey::Pubkey =
-    solana_sdk::pubkey::Pubkey::from_str_const("DQEtWAqhL651Pyk2VpvXoYhVtR5f8canQVKiYAQsJfE8");
-const DOMAIN: [u8; 32] = [7; 32];
 const TREE_DEPTH: usize = 20;
 
 struct ReferenceTree {
@@ -70,28 +62,8 @@ impl ReferenceTree {
     }
 }
 
-fn mock_program() -> Result<std::path::PathBuf> {
-    Ok(repository()?.join("onchain/target/deploy/mock_verifier.so"))
-}
-
 fn commitment_event(client: &RpcClient, signature: &Signature) -> Result<CommitmentEvent> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let transaction = loop {
-        match client.get_transaction_with_config(
-            signature,
-            RpcTransactionConfig {
-                encoding: Some(UiTransactionEncoding::Json),
-                commitment: Some(CommitmentConfig::confirmed()),
-                max_supported_transaction_version: Some(0),
-            },
-        ) {
-            Ok(transaction) => break transaction,
-            Err(_) if Instant::now() < deadline => {
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(error) => return Err(error.into()),
-        }
-    };
+    let transaction = confirmed_transaction(client, signature)?;
     let meta = transaction
         .transaction
         .meta
@@ -102,12 +74,12 @@ fn commitment_event(client: &RpcClient, signature: &Signature) -> Result<Commitm
             return Err("successful transaction has no logs".into());
         }
     };
+    let discriminator = solana_sdk::hash::hash(b"event:NewCommitment").to_bytes();
     for log in logs {
         let Some(encoded) = log.strip_prefix("Program data: ") else {
             continue;
         };
         let bytes = STANDARD.decode(encoded)?;
-        let discriminator = solana_sdk::hash::hash(b"event:NewCommitment").to_bytes();
         if bytes.starts_with(&discriminator[..8]) {
             return Ok(CommitmentEvent::try_from_slice(&bytes[8..])?);
         }
@@ -119,8 +91,7 @@ fn commitment_event(client: &RpcClient, signature: &Signature) -> Result<Commitm
 #[serial]
 #[ignore = "stress: submits 96 validator transactions"]
 fn ninety_six_appends_match_an_independent_reference() -> Result<()> {
-    let mock = mock_program()?;
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
     mint_to(
         &fixture.client,
         &fixture.payer,
@@ -157,8 +128,7 @@ fn ninety_six_appends_match_an_independent_reference() -> Result<()> {
 #[serial]
 #[ignore = "stress: submits 20 writes concurrently"]
 fn concurrent_spends_emit_unique_indices_and_match_reference() -> Result<()> {
-    let mock = mock_program()?;
-    let fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let fixture = Fixture::start()?;
     let initial = tree_state(&fixture.client, &fixture.config.tree())?;
     let blockhash = fixture.client.get_latest_blockhash()?;
     let mut transactions = Vec::with_capacity(20);

@@ -4,14 +4,13 @@ use anchor_lang::{AnchorDeserialize, InstructionData, ToAccountMetas};
 use light_hasher::{Hasher, Poseidon};
 use num_bigint::BigUint;
 use pool_e2e::harness::{
-    airdrop, create_mint, create_token_account, mint_to, repository, send, send_with_signature,
-    token_balance, Result, Validator,
+    airdrop, confirmed_transaction, create_mint, create_token_account, mint_to, repository, send,
+    send_with_signature, token_balance, Result, Validator,
 };
 use serial_test::serial;
-use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
+use solana_client::rpc_client::RpcClient;
 use solana_keccak_hasher::hashv;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     native_token::LAMPORTS_PER_SOL,
@@ -20,9 +19,7 @@ use solana_sdk::{
     transaction::Transaction as SolanaTransaction,
 };
 use solana_system_interface::program as system_program;
-use solana_transaction_status_client_types::{
-    option_serializer::OptionSerializer, UiTransactionEncoding,
-};
+use solana_transaction_status_client_types::option_serializer::OptionSerializer;
 use spl_associated_token_account::get_associated_token_address;
 use veil402_sdk::solana::MAX_ENCRYPTED_NOTE_LEN;
 use veil402_sdk::{
@@ -533,14 +530,7 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
     let signature = send_with_signature(&client, prepared.instruction.clone(), &payer, nonce)?;
     assert_eq!(token_balance(&client, &recipient_ata)?, 300);
     assert_eq!(token_balance(&client, &pool.vault())?, 700);
-    let transaction = client.get_transaction_with_config(
-        &signature,
-        RpcTransactionConfig {
-            encoding: Some(UiTransactionEncoding::Json),
-            commitment: Some(CommitmentConfig::confirmed()),
-            max_supported_transaction_version: Some(0),
-        },
-    )?;
+    let transaction = confirmed_transaction(&client, &signature)?;
     let meta = transaction
         .transaction
         .meta

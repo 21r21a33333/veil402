@@ -9,7 +9,7 @@ use zeroize::Zeroize;
 use super::Artifacts;
 use crate::{
     client::Error,
-    protocol::{Field, PublicInputs, Transaction, Values},
+    protocol::{Field, PublicInputs, Transaction, TransactionValues},
 };
 
 pub(crate) struct Witness {
@@ -51,7 +51,7 @@ impl Witness {
     }
 }
 
-fn input_map(transaction: &Transaction, values: &Values) -> InputMap {
+fn input_map(transaction: &Transaction, values: &TransactionValues) -> InputMap {
     let public = &values.public;
     let mut input = BTreeMap::new();
     input.insert("root".into(), value(public.root));

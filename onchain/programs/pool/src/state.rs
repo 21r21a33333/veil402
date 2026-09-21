@@ -21,7 +21,7 @@ type Cmt<'a> = ConcurrentMerkleTreeZeroCopy<'a, Poseidon, TREE_HEIGHT>;
 /// Initialize Light's concurrent Merkle tree into the tree account (past the discriminator).
 pub fn init_tree(account: &AccountInfo) -> Result<()> {
     let mut data = account.try_borrow_mut_data()?;
-    let mut t = CmtMut::from_bytes_zero_copy_init(
+    let mut tree = CmtMut::from_bytes_zero_copy_init(
         &mut data[DISCRIMINATOR..],
         TREE_HEIGHT,
         CANOPY,
@@ -29,17 +29,18 @@ pub fn init_tree(account: &AccountInfo) -> Result<()> {
         ROOTS_SIZE,
     )
     .map_err(|_| error!(PoolError::TreeError))?;
-    t.init().map_err(|_| error!(PoolError::TreeError))?;
+    tree.init().map_err(|_| error!(PoolError::TreeError))?;
     Ok(())
 }
 
 /// Append one commitment; returns its leaf index.
 pub fn append_leaf(account: &AccountInfo, leaf: &[u8; 32]) -> Result<u64> {
     let mut data = account.try_borrow_mut_data()?;
-    let mut t = CmtMut::from_bytes_zero_copy_mut(&mut data[DISCRIMINATOR..])
+    let mut tree = CmtMut::from_bytes_zero_copy_mut(&mut data[DISCRIMINATOR..])
         .map_err(|_| error!(PoolError::TreeError))?;
-    let leaf_index = t.next_index();
-    t.append(leaf).map_err(|_| error!(PoolError::TreeError))?;
+    let leaf_index = tree.next_index();
+    tree.append(leaf)
+        .map_err(|_| error!(PoolError::TreeError))?;
     Ok(leaf_index as u64)
 }
 
@@ -49,9 +50,9 @@ pub fn is_known_root(account: &AccountInfo, root: &[u8; 32]) -> Result<bool> {
         return Ok(false);
     }
     let data = account.try_borrow_data()?;
-    let t = Cmt::from_bytes_zero_copy(&data[DISCRIMINATOR..])
+    let tree = Cmt::from_bytes_zero_copy(&data[DISCRIMINATOR..])
         .map_err(|_| error!(PoolError::TreeError))?;
-    Ok(t.roots.iter().any(|r| r == root))
+    Ok(tree.roots.iter().any(|known_root| known_root == root))
 }
 
 /// Pool config (small, normal account). The tree lives in a separate account managed by Light.

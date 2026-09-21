@@ -31,7 +31,7 @@ is specified in [withdrawal-integration.md](2026-09-19-withdrawal-integration.md
 - Proof: exactly 388 bytes for the pinned `transaction-v3` artifact.
 - Encrypted note: at most 128 bytes so the legacy Solana transaction remains
   below the 1232-byte packet limit.
-- Compute: the verifier measures about 456K CU; clients should request about
+- Compute: the full 128-byte withdrawal path measures about 544K CU; clients should request about
   650K CU for the full transaction.
 
 Relayer fees, inbound deposits through `transact`, multi-input/multi-output

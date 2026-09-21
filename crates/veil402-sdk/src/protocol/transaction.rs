@@ -56,7 +56,7 @@ pub struct PublicInputs {
     pub hash: Field,
 }
 
-pub(crate) struct Values {
+pub(crate) struct TransactionValues {
     pub(crate) public: PublicInputs,
     pub(crate) output_key: Field,
 }
@@ -96,7 +96,7 @@ impl Transaction {
         Ok(self.values()?.public)
     }
 
-    pub(crate) fn values(&self) -> Result<Values, Error> {
+    pub(crate) fn values(&self) -> Result<TransactionValues, Error> {
         if u64::from(self.input.merkle.index) >= (1_u64 << TREE_DEPTH) {
             return Err(Error::Transaction("leaf index exceeds tree capacity"));
         }
@@ -110,10 +110,11 @@ impl Transaction {
         let root = note::merkle_root(leaf, self.input.merkle.index, &self.input.merkle.siblings)?;
         let nullifier = note::nullifier(&self.input.owner, self.input.merkle.index)?;
         let output_key = self.send.public_key()?;
-        let commitment = note::commitment(&output_key, &self.input.note.asset, self.send.value)?;
+        let commitment =
+            note::commitment_from_key(&output_key, &self.input.note.asset, self.send.value)?;
         let amount = Field::from_signed(self.public.amount);
 
-        Ok(Values {
+        Ok(TransactionValues {
             public: PublicInputs {
                 root,
                 nullifier,

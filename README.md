@@ -80,7 +80,7 @@ flowchart LR
   that leaf index, the output commitment is well-formed with `value < 2^64`, **value is conserved**
   (`in_value + public_amount == out_value`), and the external data is bound.
 - **Verifier.** The proof is verified **on-chain via CPI** into a Groth16 verifier program generated
-  by [Sunspot](https://github.com/warp-id/sunspot) (BN254, ~456K CU measured locally). The pool program **assembles
+  by [Sunspot](https://github.com/warp-id/sunspot) (BN254, ~544K CU measured locally). The pool program **assembles
   the public witness itself** from values it has already checked — it never trusts a client-supplied
   witness blob.
 - **Pool program (Anchor).** `shield` and `transact` instructions; commitments stored in
@@ -116,7 +116,7 @@ Veil402's `transact` follows the canonical shielded-pool flow shared by **Tornad
 known-root check → nullifier unspent guard → bind external data into a public input → verify the
 proof → mark spent → move tokens → insert output commitment → emit events for indexers.
 
-The contract and circuit were **audited end-to-end against those references**, which hardened the
+The contract and circuit were **reviewed end-to-end against those references**, which hardened the
 current implementation:
 
 - `mint` is pinned to `pool.mint` on both `shield` and `transact` (prevents fake-collateral drains).

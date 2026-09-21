@@ -15,6 +15,7 @@ pool = { path = "../../programs/pool", features = ["no-entrypoint"] }
 solana-client = "2.3"
 solana-sdk = "2.3"
 solana-system-interface = { version = "1", features = ["bincode"] }
+solana-transaction-status-client-types = "2.3"
 spl-associated-token-account = "7"
 spl-token = "8"
 tempfile = "3"
@@ -25,5 +26,4 @@ base64 = "0.22"
 num-bigint = "0.4"
 serial_test = "3"
 solana-keccak-hasher = "2.2.1"
-solana-transaction-status-client-types = "2.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

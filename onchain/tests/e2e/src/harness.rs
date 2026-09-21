@@ -8,7 +8,7 @@ use std::{
 
 use light_concurrent_merkle_tree::zero_copy::ConcurrentMerkleTreeZeroCopy;
 use light_hasher::Poseidon;
-use solana_client::rpc_client::RpcClient;
+use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
@@ -19,6 +19,9 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+};
 use spl_associated_token_account::{
     get_associated_token_address, instruction::create_associated_token_account,
 };
@@ -27,6 +30,8 @@ pub type Result<T> = std::result::Result<T, Box<dyn StdError>>;
 
 const TREE_HEIGHT: usize = 20;
 const DISCRIMINATOR: usize = 8;
+const TRANSACTION_HISTORY_TIMEOUT: Duration = Duration::from_secs(10);
+const TRANSACTION_HISTORY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub fn repository() -> Result<PathBuf> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -167,6 +172,29 @@ pub fn send_all_with_signature(
     let transaction =
         Transaction::new_signed_with_payer(instructions, Some(&payer.pubkey()), signers, blockhash);
     Ok(client.send_and_confirm_transaction(&transaction)?)
+}
+
+pub fn confirmed_transaction(
+    client: &RpcClient,
+    signature: &Signature,
+) -> Result<EncodedConfirmedTransactionWithStatusMeta> {
+    let deadline = Instant::now() + TRANSACTION_HISTORY_TIMEOUT;
+    loop {
+        match client.get_transaction_with_config(
+            signature,
+            RpcTransactionConfig {
+                encoding: Some(UiTransactionEncoding::Json),
+                commitment: Some(CommitmentConfig::confirmed()),
+                max_supported_transaction_version: Some(0),
+            },
+        ) {
+            Ok(transaction) => return Ok(transaction),
+            Err(_) if Instant::now() < deadline => {
+                std::thread::sleep(TRANSACTION_HISTORY_POLL_INTERVAL);
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 pub fn token_balance(client: &RpcClient, address: &Pubkey) -> Result<u64> {

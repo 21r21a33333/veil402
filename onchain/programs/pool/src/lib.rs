@@ -49,8 +49,8 @@ impl ExtData {
 }
 
 fn asset_id_of(mint: &Pubkey) -> Result<[u8; 32]> {
-    let (hi, lo) = util::split32(&mint.to_bytes());
-    util::poseidon(&[&hi, &lo])
+    let (high, low) = util::split32(&mint.to_bytes());
+    util::poseidon(&[&high, &low])
 }
 
 /// Public witness assembled from checked values: 12-byte gnark header (5 inputs), then
@@ -184,22 +184,31 @@ pub mod pool {
 
         // 2. Recompute bound values and verify the proof against them.
         let public_amount = util::public_amount_field(i128::from(ext_amount));
-        let edh = ext_data.hash(
+        let external_data_hash = ext_data.hash(
             &ctx.accounts.pool.domain,
             &ctx.accounts.pool.key(),
             &ctx.accounts.pool.mint,
             ext_amount,
         )?;
-        let pw = public_witness(&root, &nullifier, &out_commitment, &public_amount, &edh);
-        verify_cpi(&ctx.accounts.verifier_program, &proof, &pw)?;
+        let witness = public_witness(
+            &root,
+            &nullifier,
+            &out_commitment,
+            &public_amount,
+            &external_data_hash,
+        );
+        verify_cpi(&ctx.accounts.verifier_program, &proof, &witness)?;
 
         // 3. Spend the nullifier (PDA `init` = double-spend guard).
         ctx.accounts.nullifier_record.nullifier = nullifier;
 
         // 4. Pay out on withdrawal (vault PDA signs); recipient is bound in ext_data_hash.
         if ext_amount < 0 {
-            let w = ext_amount.unsigned_abs();
-            require!(ctx.accounts.vault.amount >= w, PoolError::InsufficientVault);
+            let withdrawal_amount = ext_amount.unsigned_abs();
+            require!(
+                ctx.accounts.vault.amount >= withdrawal_amount,
+                PoolError::InsufficientVault
+            );
             require_keys_eq!(
                 ctx.accounts.recipient_ata.owner,
                 ext_data.recipient,
@@ -217,7 +226,7 @@ pub mod pool {
                     },
                     &[seeds],
                 ),
-                w,
+                withdrawal_amount,
             )?;
         }
 

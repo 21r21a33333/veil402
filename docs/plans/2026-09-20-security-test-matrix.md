@@ -42,7 +42,7 @@ transaction rollback.
 - Task 1 committed as `e875711`.
 - Task 2 committed as `1fad017`.
 - Task 3 committed as `ad4e210`.
-- Task 4 implemented and verified; pending review.
+- Task 4 committed as `2b0c427`.
 
 ## Task 1 — Close field and circuit invariants
 

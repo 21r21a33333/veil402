@@ -16,8 +16,8 @@ pub use error::Error;
 /// Paths and limits needed by the local prover.
 #[derive(Clone, Debug)]
 pub struct Config {
-    worker: PathBuf,
-    artifacts: PathBuf,
+    worker_executable: PathBuf,
+    artifact_directory: PathBuf,
     timeout: Duration,
 }
 
@@ -25,8 +25,8 @@ impl Config {
     /// Creates a configuration for a worker executable and artifact bundle.
     pub fn new(worker: impl Into<PathBuf>, artifacts: impl Into<PathBuf>) -> Self {
         Self {
-            worker: worker.into(),
-            artifacts: artifacts.into(),
+            worker_executable: worker.into(),
+            artifact_directory: artifacts.into(),
             timeout: Duration::from_secs(120),
         }
     }
@@ -53,8 +53,8 @@ pub struct Proof {
 /// Entry point for client-side Veil operations.
 pub struct Veil {
     artifacts: Arc<Artifacts>,
-    directory: PathBuf,
-    executable: PathBuf,
+    artifact_directory: PathBuf,
+    worker_executable: PathBuf,
     timeout: Duration,
     worker: Mutex<Option<Worker>>,
 }
@@ -67,11 +67,11 @@ impl Veil {
     /// Returns [`Error::Artifacts`] when the artifact bundle is unavailable, corrupt, or was
     /// produced by a different Noir version.
     pub fn open(config: Config) -> Result<Self, Error> {
-        let artifacts = Artifacts::open(&config.artifacts)?;
+        let artifacts = Artifacts::open(&config.artifact_directory)?;
         Ok(Self {
             artifacts: Arc::new(artifacts),
-            directory: config.artifacts,
-            executable: config.worker,
+            artifact_directory: config.artifact_directory,
+            worker_executable: config.worker_executable,
             timeout: config.timeout,
             worker: Mutex::new(None),
         })
@@ -94,8 +94,8 @@ impl Veil {
             Some(worker) => worker,
             None => {
                 Worker::start(
-                    &self.executable,
-                    &self.directory,
+                    &self.worker_executable,
+                    &self.artifact_directory,
                     &self.artifacts.manifest.id,
                     self.timeout,
                 )

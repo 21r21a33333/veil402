@@ -17,7 +17,7 @@ const VERSION: u32 = 1;
 
 pub(crate) struct Worker {
     process: Process,
-    next: u64,
+    next_request_id: u64,
 }
 
 impl Worker {
@@ -45,7 +45,10 @@ impl Worker {
             }
         }
 
-        Ok(Self { process, next: 0 })
+        Ok(Self {
+            process,
+            next_request_id: 0,
+        })
     }
 
     pub(crate) async fn prove(
@@ -53,21 +56,21 @@ impl Worker {
         witness: &Witness,
         timeout: Duration,
     ) -> Result<(Vec<u8>, Vec<u8>), Error> {
-        self.next = self.next.wrapping_add(1);
-        if self.next == 0 {
+        self.next_request_id = self.next_request_id.wrapping_add(1);
+        if self.next_request_id == 0 {
             self.process.stop().await;
             return Err(Error::Prover("worker request ID was exhausted"));
         }
 
         let mut request = Request {
-            id: self.next,
+            id: self.next_request_id,
             witness: witness.bytes.clone(),
         };
         let result = tokio::time::timeout(timeout, async {
             self.process.send(&request).await?;
             request.witness.zeroize();
             let response = self.process.receive::<Response>().await?;
-            self.validate(response)
+            self.validate_response(response)
         })
         .await;
         request.witness.zeroize();
@@ -85,8 +88,8 @@ impl Worker {
         }
     }
 
-    fn validate(&self, response: Response) -> Result<(Vec<u8>, Vec<u8>), Error> {
-        if response.id != self.next {
+    fn validate_response(&self, response: Response) -> Result<(Vec<u8>, Vec<u8>), Error> {
+        if response.id != self.next_request_id {
             return Err(Error::Prover("worker response ID does not match"));
         }
         let failure = Failure::try_from(response.failure)

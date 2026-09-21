@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use anchor_lang::{InstructionData, ToAccountMetas};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -17,6 +15,9 @@ use crate::harness::{
 };
 
 pub const PROOF_BYTES: usize = 388;
+pub const MOCK_VERIFIER: Pubkey =
+    Pubkey::from_str_const("DQEtWAqhL651Pyk2VpvXoYhVtR5f8canQVKiYAQsJfE8");
+pub const DOMAIN: [u8; 32] = [7; 32];
 
 pub fn field(value: u64) -> [u8; 32] {
     let mut bytes = [0; 32];
@@ -139,7 +140,7 @@ pub struct Snapshot {
 }
 
 pub struct Fixture {
-    _validator: Validator,
+    validator: Validator,
     pub client: RpcClient,
     pub payer: Keypair,
     pub mint: Pubkey,
@@ -152,17 +153,18 @@ pub struct Fixture {
 }
 
 impl Fixture {
-    pub fn start(verifier: Pubkey, verifier_path: &Path, domain: [u8; 32]) -> Result<Self> {
+    pub fn start() -> Result<Self> {
         let repository = repository()?;
-        let validator = Validator::start(&repository, &[(verifier, verifier_path)])?;
+        let verifier_path = repository.join("onchain/target/deploy/mock_verifier.so");
+        let validator = Validator::start(&repository, &[(MOCK_VERIFIER, &verifier_path)])?;
         let client = validator.client();
         let payer = Keypair::new();
         airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
         let mint = create_mint(&client, &payer)?;
-        let config = VeilPool::new(pool::ID, verifier, mint, domain)?;
+        let config = VeilPool::new(pool::ID, MOCK_VERIFIER, mint, DOMAIN)?;
         send(
             &client,
-            init_instruction(&config, mint, verifier, payer.pubkey(), domain),
+            init_instruction(&config, mint, MOCK_VERIFIER, payer.pubkey(), DOMAIN),
             &payer,
             1,
         )?;
@@ -170,7 +172,7 @@ impl Fixture {
         let recipient = Keypair::new().pubkey();
         let recipient_ata = create_token_account(&client, &payer, &recipient, &mint)?;
         Ok(Self {
-            _validator: validator,
+            validator,
             client,
             payer,
             mint,
@@ -178,7 +180,7 @@ impl Fixture {
             depositor_ata,
             recipient,
             recipient_ata,
-            verifier,
+            verifier: MOCK_VERIFIER,
             nonce: 2,
         })
     }
@@ -201,7 +203,7 @@ impl Fixture {
     }
 
     pub fn rpc_url(&self) -> &str {
-        self._validator.rpc_url()
+        self.validator.rpc_url()
     }
 
     pub fn shield(&mut self, npk: [u8; 32], amount: u64, encrypted_note: Vec<u8>) -> Result<()> {

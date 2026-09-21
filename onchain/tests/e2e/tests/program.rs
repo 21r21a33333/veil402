@@ -8,7 +8,7 @@ use pool_e2e::{
     },
     scenario::{
         field, init_instruction, nullifier_address, shield_instruction, transact_instruction,
-        Fixture, Transaction, PROOF_BYTES,
+        Fixture, Transaction, DOMAIN, MOCK_VERIFIER, PROOF_BYTES,
     },
 };
 use serial_test::serial;
@@ -20,14 +20,7 @@ use solana_sdk::{
 use solana_system_interface::program as system_program;
 use veil402_sdk::Pool as VeilPool;
 
-const MOCK_VERIFIER: Pubkey =
-    Pubkey::from_str_const("DQEtWAqhL651Pyk2VpvXoYhVtR5f8canQVKiYAQsJfE8");
-const DOMAIN: [u8; 32] = [7; 32];
 const TREE_BYTES: usize = 8_224;
-
-fn mock_program() -> Result<std::path::PathBuf> {
-    Ok(repository()?.join("onchain/target/deploy/mock_verifier.so"))
-}
 
 fn non_canonical(value: [u8; 32]) -> Result<[u8; 32]> {
     let modulus = BigUint::parse_bytes(
@@ -47,8 +40,7 @@ fn non_canonical(value: [u8; 32]) -> Result<[u8; 32]> {
 #[test]
 #[serial]
 fn initialization_enforces_configuration_and_layout() -> Result<()> {
-    let mock = mock_program()?;
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
 
     // I1/I6: initialization must persist the exact authority, verifier, mint,
     // SDK-derived asset ID, and proof-binding domain supplied by the client.
@@ -150,8 +142,7 @@ fn initialization_enforces_configuration_and_layout() -> Result<()> {
 #[test]
 #[serial]
 fn shield_boundaries_and_account_constraints_are_atomic() -> Result<()> {
-    let mock = mock_program()?;
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
     mint_to(
         &fixture.client,
         &fixture.payer,
@@ -232,7 +223,7 @@ fn shield_boundaries_and_account_constraints_are_atomic() -> Result<()> {
 
     // S3: exercise u64::MAX in an isolated pool so later cases are not blocked
     // by the mint-supply and token-balance maximums.
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
     mint_to(
         &fixture.client,
         &fixture.payer,
@@ -252,8 +243,7 @@ fn shield_boundaries_and_account_constraints_are_atomic() -> Result<()> {
 #[test]
 #[serial]
 fn public_leg_verifier_and_proof_boundaries_are_atomic() -> Result<()> {
-    let mock = mock_program()?;
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
     mint_to(
         &fixture.client,
         &fixture.payer,
@@ -315,8 +305,7 @@ fn public_leg_verifier_and_proof_boundaries_are_atomic() -> Result<()> {
 #[test]
 #[serial]
 fn root_window_and_encoding_boundaries_are_enforced() -> Result<()> {
-    let mock = mock_program()?;
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
     mint_to(
         &fixture.client,
         &fixture.payer,
@@ -363,8 +352,7 @@ fn root_window_and_encoding_boundaries_are_enforced() -> Result<()> {
 #[test]
 #[serial]
 fn nullifiers_and_withdrawals_are_atomic() -> Result<()> {
-    let mock = mock_program()?;
-    let mut fixture = Fixture::start(MOCK_VERIFIER, &mock, DOMAIN)?;
+    let mut fixture = Fixture::start()?;
     mint_to(
         &fixture.client,
         &fixture.payer,

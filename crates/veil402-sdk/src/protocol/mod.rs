@@ -5,7 +5,7 @@ mod transaction;
 
 pub use field::{Field, Secret};
 pub use note::{Note, Output, Owner};
-pub(crate) use transaction::Values;
+pub(crate) use transaction::TransactionValues;
 pub use transaction::{MerklePath, Public, PublicInputs, Spend, Transaction};
 
 /// Number of siblings in a transaction circuit Merkle path.
