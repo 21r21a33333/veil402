@@ -54,7 +54,11 @@ pub struct Validator {
 }
 
 impl Validator {
-    pub fn start(repository: &Path, programs: &[(Pubkey, &Path)]) -> Result<Self> {
+    pub fn start(
+        repository: &Path,
+        pool_authority: Pubkey,
+        programs: &[(Pubkey, &Path)],
+    ) -> Result<Self> {
         let rpc_port = free_port()?;
         let faucet_port = free_port()?;
         let ledger = tempfile::tempdir()?;
@@ -69,8 +73,9 @@ impl Validator {
             .arg(ledger.path())
             .args(["--rpc-port", &rpc_port.to_string()])
             .args(["--faucet-port", &faucet_port.to_string()])
-            .args(["--bpf-program", &pool::ID.to_string()])
-            .arg(pool);
+            .args(["--upgradeable-program", &pool::ID.to_string()])
+            .arg(pool)
+            .arg(pool_authority.to_string());
         for (id, path) in programs {
             command.args(["--bpf-program", &id.to_string()]).arg(path);
         }

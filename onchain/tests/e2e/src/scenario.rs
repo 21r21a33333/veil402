@@ -45,6 +45,8 @@ pub fn init_instruction(
             vault: config.vault(),
             verifier_program: verifier,
             authority,
+            pool_program: pool::ID,
+            program_data: solana_sdk::bpf_loader_upgradeable::get_program_data_address(&pool::ID),
             token_program: spl_token::id(),
             associated_token_program: spl_associated_token_account::id(),
             system_program: system_program::id(),
@@ -157,9 +159,13 @@ impl Fixture {
     pub fn start() -> Result<Self> {
         let repository = repository()?;
         let verifier_path = repository.join("onchain/target/deploy/mock_verifier.so");
-        let validator = Validator::start(&repository, &[(MOCK_VERIFIER, &verifier_path)])?;
-        let client = validator.client();
         let payer = Keypair::new();
+        let validator = Validator::start(
+            &repository,
+            payer.pubkey(),
+            &[(MOCK_VERIFIER, &verifier_path)],
+        )?;
+        let client = validator.client();
         airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
         let mint = create_mint(&client, &payer)?;
         let config = VeilPool::new(pool::ID, MOCK_VERIFIER, mint, DOMAIN)?;

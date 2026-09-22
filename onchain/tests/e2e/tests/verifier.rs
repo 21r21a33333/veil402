@@ -208,9 +208,13 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
 
     // Run the real pool and verifier programs under a local validator.
     let verifier = repository.join("circuits/transaction/target/transaction.so");
-    let validator = Validator::start(&repository, &[(VERIFIER, verifier.as_path())])?;
-    let client = validator.client();
     let payer = Keypair::new();
+    let validator = Validator::start(
+        &repository,
+        payer.pubkey(),
+        &[(VERIFIER, verifier.as_path())],
+    )?;
+    let client = validator.client();
     airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
 
     let mint = create_mint(&client, &payer)?;
@@ -225,6 +229,8 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
             vault: pool.vault(),
             verifier_program: VERIFIER,
             authority: payer.pubkey(),
+            pool_program: pool::ID,
+            program_data: solana_sdk::bpf_loader_upgradeable::get_program_data_address(&pool::ID),
             token_program: spl_token::id(),
             associated_token_program: spl_associated_token_account::id(),
             system_program: system_program::id(),

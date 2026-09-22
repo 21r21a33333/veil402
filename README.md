@@ -31,16 +31,16 @@ notes (UTXOs) instead of public balances:
 
 - **Shield (deposit).** Move SPL tokens into the pool's vault; a hidden **note commitment** is
   inserted into an on-chain Poseidon Merkle tree.
-- **Transact (spend).** Prove in zero knowledge that you own an existing note and destroy it —
-  revealing only a **nullifier** (so it can't be double-spent) and a Groth16 proof — while creating a
-  new output note. A **private transfer** reveals no amounts; a **withdrawal** pays a recipient the
-  public leg of the transaction.
+- **Transact (spend).** Prove in zero knowledge that you own two input notes and destroy them —
+  revealing only their **nullifiers** (so they cannot be double-spent) and a Groth16 proof — while
+  creating two output notes. A **private transfer** reveals no amounts; a **withdrawal** pays a
+  recipient the public leg of the transaction.
 
 Because commitments are hashes and spends are proven in zero knowledge, on-chain observers cannot
 link deposits to withdrawals, nor see amounts or recipients of shielded transfers.
 
-Today the pool implements the **1-input / 1-output** transaction (the smallest real join-split);
-the design generalizes to **n-in / m-out**.
+Today the pool implements a fixed **2-input / 2-output** join-split. Larger shapes remain a future
+protocol version because proof cost is fixed by the circuit shape.
 
 ## Why it's different
 
@@ -75,10 +75,10 @@ flowchart LR
   end
 ```
 
-- **Circuit (Noir).** Proves: the spender owns the input note (derives the key hierarchy from
-  secrets), the note is a leaf under a known `root`, the revealed `nullifier` is the correct one for
-  that leaf index, the output commitment is well-formed with `value < 2^64`, **value is conserved**
-  (`in_value + public_amount == out_value`), and the external data is bound.
+- **Circuit (Noir).** Proves: the spender owns both input notes (derives the key hierarchy from
+  secrets), both notes are leaves under a known `root`, each revealed `nullifier` is correct for its
+  leaf index, both output commitments are well-formed with `value < 2^64`, **value is conserved**
+  (`sum(inputs) + public_amount == sum(outputs)`), and the external data is bound.
 - **Verifier.** The proof is verified **on-chain via CPI** into a Groth16 verifier program generated
   by [Sunspot](https://github.com/warp-id/sunspot) (BN254, ~544K CU measured locally). The pool program **assembles
   the public witness itself** from values it has already checked — it never trusts a client-supplied
@@ -86,7 +86,8 @@ flowchart LR
 - **Pool program (Anchor).** `shield` and `transact` instructions; commitments stored in
   [Light Protocol's audited `light-concurrent-merkle-tree`](https://github.com/Lightprotocol/light-protocol)
   (reused as-is); **one PDA per nullifier** whose `init` is the atomic double-spend guard; a
-  PDA-owned SPL vault (ATA) holds shielded tokens.
+  PDA-owned SPL vault (ATA) holds shielded tokens. The current program upgrade authority must
+  initialize the singleton pool before upgrade authority is transferred or removed.
 
 ## Cryptographic primitives
 
@@ -101,7 +102,8 @@ commitment     = Poseidon(npk, asset_id, value)                       # the Merk
 nullifier      = Poseidon(nullifying_key, leaf_index)                 # bound to the leaf's position
 ```
 
-**Public inputs** (1-in / 1-out): `[ root, nullifier, out_commitment, public_amount, ext_data_hash ]`.
+**Public inputs** (2-in / 2-out): `[ root, nullifier_0, nullifier_1, out_commitment_0,
+out_commitment_1, public_amount, ext_data_hash ]`.
 
 - `public_amount` is the signed public flow (`ext_amount`), field-encoded (`x` for `x ≥ 0`,
   else `P − |x|`); `0` for a pure private transfer, negative for a withdrawal.
@@ -114,12 +116,13 @@ nullifier      = Poseidon(nullifying_key, leaf_index)                 # bound to
 Veil402's `transact` follows the canonical shielded-pool flow shared by **Tornado Nova** and
 **RAILGUN** (see [`docs/research/04-contracts-and-disclosure-reference.md`](docs/research/04-contracts-and-disclosure-reference.md)):
 known-root check → nullifier unspent guard → bind external data into a public input → verify the
-proof → mark spent → move tokens → insert output commitment → emit events for indexers.
+proof → mark spent → move tokens → insert output commitments → emit events for indexers.
 
 The contract and circuit were **reviewed end-to-end against those references**, which hardened the
 current implementation:
 
-- `mint` is pinned to `pool.mint` on both `shield` and `transact` (prevents fake-collateral drains).
+- `mint` is pinned to `pool.asset.mint` on both `shield` and `transact` (prevents
+  fake-collateral drains).
 - `transact` is **spend-only** (`ext_amount ≤ 0`); deposits go through `shield`, closing the
   value-from-nothing path.
 - Public-amount encoding uses the full magnitude (no truncation); withdrawal amounts are
@@ -160,10 +163,10 @@ cd onchain && cargo build-sbf
 
 | Phase | Scope | Status |
 |---|---|---|
-| W2 | 1-in/1-out Noir circuit + Sunspot verifier | ✅ done |
+| W2 | 2-in/2-out Noir circuit + Sunspot verifier | ✅ done |
 | W3 | Pool contract (`shield`, spend-only `transact`) | ✅ done |
 | W4 | On-chain e2e tests with real proofs + withdrawal client | next |
-| T  | 2-in/2-out (join-split) + inbound deposit + relayer fee | planned |
+| T  | Inbound deposit through `transact` + relayer fee | planned |
 | K  | Key management, note ciphertexts, discovery | planned |
 | D  | Selective-disclosure MVP (opening + binding sig) → ZK predicate disclosures | planned |
 | S  | SDK + agent payment demo | planned |

@@ -1,3 +1,4 @@
+use anchor_lang::AccountDeserialize;
 use light_concurrent_merkle_tree::ConcurrentMerkleTree;
 use light_hasher::Poseidon;
 use num_bigint::BigUint;
@@ -42,15 +43,14 @@ fn non_canonical(value: [u8; 32]) -> Result<[u8; 32]> {
 fn initialization_enforces_configuration_and_layout() -> Result<()> {
     let mut fixture = Fixture::start()?;
 
-    // I1/I6: initialization must persist the exact authority, verifier, mint,
-    // SDK-derived asset ID, and proof-binding domain supplied by the client.
+    // I1/I6: initialization must persist the exact verifier, asset, and
+    // proof-binding domain supplied by the trusted deployment authority.
     let account = fixture.client.get_account(&fixture.config.address())?;
-    let state = &account.data[8..];
-    assert_eq!(&state[0..32], fixture.payer.pubkey().as_ref());
-    assert_eq!(&state[32..64], MOCK_VERIFIER.as_ref());
-    assert_eq!(&state[64..96], fixture.mint.as_ref());
-    assert_eq!(&state[96..128], &fixture.config.asset().to_bytes());
-    assert_eq!(&state[128..160], &DOMAIN);
+    let state = pool::Pool::try_deserialize(&mut account.data.as_slice())?;
+    assert_eq!(state.verifier, MOCK_VERIFIER);
+    assert_eq!(state.asset.mint, fixture.mint);
+    assert_eq!(state.asset.id, fixture.config.asset().to_bytes());
+    assert_eq!(state.domain, DOMAIN);
 
     // I5: the fixed Anchor allocation must exactly fit Light's configured tree.
     let expected = ConcurrentMerkleTree::<Poseidon, 20>::size_in_account(20, 8, 64, 0);
@@ -74,14 +74,53 @@ fn initialization_enforces_configuration_and_layout() -> Result<()> {
     fixture.assert_rejected(reinitialize, fixture.recipient_ata)?;
     drop(fixture);
 
-    // I3: Anchor's executable constraint rejects a wallet as the verifier and
-    // rolls back every account the failed initialization tried to create.
     let repository = repository()?;
-    // I4: any executable program can be configured, but a program that does
-    // not implement the verifier interface must fail during its CPI.
-    let validator = Validator::start(&repository, &[])?;
+    // A signer other than the current program upgrade authority cannot
+    // claim the singleton or leave any partially initialized account behind.
+    let initializer = Keypair::new();
+    let validator = Validator::start(&repository, initializer.pubkey(), &[])?;
     let client = validator.client();
+    let attacker = Keypair::new();
+    airdrop(&client, &initializer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
+    airdrop(&client, &attacker.pubkey(), 100 * LAMPORTS_PER_SOL)?;
+    let mint = create_mint(&client, &initializer)?;
+    let config = VeilPool::new(pool::ID, system_program::id(), mint, DOMAIN)?;
+    assert!(send(
+        &client,
+        init_instruction(
+            &config,
+            mint,
+            system_program::id(),
+            attacker.pubkey(),
+            DOMAIN,
+        ),
+        &attacker,
+        1,
+    )
+    .is_err());
+    for address in [config.address(), config.tree(), config.vault()] {
+        assert!(client.get_account(&address).is_err());
+    }
+    send(
+        &client,
+        init_instruction(
+            &config,
+            mint,
+            system_program::id(),
+            initializer.pubkey(),
+            DOMAIN,
+        ),
+        &initializer,
+        2,
+    )?;
+    assert!(client.get_account(&config.address()).is_ok());
+    drop(validator);
+
+    // I4: Anchor's executable constraint rejects a wallet as the verifier and
+    // rolls back every account the failed initialization tried to create.
     let payer = Keypair::new();
+    let validator = Validator::start(&repository, payer.pubkey(), &[])?;
+    let client = validator.client();
     airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
     let mint = create_mint(&client, &payer)?;
     let config = VeilPool::new(pool::ID, payer.pubkey(), mint, DOMAIN)?;
@@ -95,9 +134,11 @@ fn initialization_enforces_configuration_and_layout() -> Result<()> {
     assert!(client.get_account(&config.address()).is_err());
     drop(validator);
 
-    let validator = Validator::start(&repository, &[])?;
-    let client = validator.client();
+    // I4: any executable program can be configured, but a program that does
+    // not implement the verifier interface must fail during its CPI.
     let payer = Keypair::new();
+    let validator = Validator::start(&repository, payer.pubkey(), &[])?;
+    let client = validator.client();
     airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
     let mint = create_mint(&client, &payer)?;
     let config = VeilPool::new(pool::ID, system_program::id(), mint, DOMAIN)?;
