@@ -8,6 +8,10 @@ pub enum Error {
     #[error("invalid BN254 field encoding")]
     Field,
 
+    /// The operating system could not provide cryptographically secure randomness.
+    #[error("secure randomness is unavailable")]
+    Random,
+
     /// Poseidon rejected the supplied inputs.
     #[error("Poseidon input is invalid")]
     Poseidon,

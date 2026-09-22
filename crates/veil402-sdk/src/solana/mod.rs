@@ -1,32 +1,33 @@
-//! Solana pool configuration and withdrawal instruction construction.
+//! Solana pool configuration and transaction instruction construction.
 
 mod binding;
 mod instruction;
 
-use crate::{Error, Field, Proof};
+use crate::{Error, Field, Proof, protocol::Plan};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-pub(crate) const DOMAIN: &[u8] = b"veil402:transact:v1";
+pub(crate) const DOMAIN: &[u8] = b"veil402:transact:v4";
+pub(crate) const VERSION_SEED: &[u8] = b"v4";
 
-/// Largest encrypted note accepted by the v1 transaction instruction.
+/// Largest encrypted note accepted for each v4 output.
 pub const MAX_ENCRYPTED_NOTE_LEN: usize = 128;
 
 /// Immutable configuration for one deployed pool.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pool {
-    program: Pubkey,
-    verifier: Pubkey,
-    mint: Pubkey,
-    domain: [u8; 32],
-    address: Pubkey,
-    tree: Pubkey,
-    vault: Pubkey,
+    pub(crate) program: Pubkey,
+    pub(crate) verifier: Pubkey,
+    pub(crate) mint: Pubkey,
+    pub(crate) domain: [u8; 32],
+    pub(crate) address: Pubkey,
+    pub(crate) tree: Pubkey,
+    pub(crate) vault: Pubkey,
     asset: Field,
 }
 
 impl Pool {
-    /// Creates a pool configuration and derives its canonical addresses.
+    /// Creates a v4 pool configuration and derives its canonical addresses.
     ///
     /// # Errors
     ///
@@ -37,8 +38,8 @@ impl Pool {
         mint: Pubkey,
         domain: [u8; 32],
     ) -> Result<Self, Error> {
-        let (address, _) = Pubkey::find_program_address(&[b"pool"], &program);
-        let (tree, _) = Pubkey::find_program_address(&[b"tree"], &program);
+        let (address, _) = Pubkey::find_program_address(&[b"pool", VERSION_SEED], &program);
+        let (tree, _) = Pubkey::find_program_address(&[b"tree", address.as_ref()], &program);
         let vault = spl_associated_token_account_interface::address::get_associated_token_address_with_program_id(
             &address,
             &mint,
@@ -81,51 +82,63 @@ impl Pool {
         self.asset
     }
 
-    pub(crate) fn bind(&self, withdrawal: &Withdrawal) -> Result<Field, Error> {
-        if withdrawal.recipient == self.address {
-            return Err(Error::Withdrawal("recipient resolves to the pool vault"));
-        }
-        binding::withdrawal(self, withdrawal)
+    pub(crate) fn bind(&self, external: &External, amount: i64) -> Result<Field, Error> {
+        binding::external(self, external, amount)
     }
 
     pub(crate) fn instruction(
         &self,
         proof: &Proof,
-        withdrawal: &Withdrawal,
+        external: &External,
+        amount: i64,
         payer: Pubkey,
     ) -> Result<Instruction, Error> {
-        instruction::withdraw(self, proof, withdrawal, payer)
+        instruction::transact(self, proof, external, amount, payer)
     }
 }
 
-/// Public withdrawal data bound into a proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct External {
+    pub(crate) recipient: Pubkey,
+    pub(crate) encrypted: [Vec<u8>; 2],
+}
+
+impl External {
+    pub(crate) fn new(plan: &Plan, recipient: Pubkey) -> Result<Self, Error> {
+        let encrypted = plan.encrypted();
+        if encrypted
+            .iter()
+            .any(|payload| payload.len() > MAX_ENCRYPTED_NOTE_LEN)
+        {
+            return Err(Error::Transaction("encrypted note exceeds 128 bytes"));
+        }
+        Ok(External {
+            recipient,
+            encrypted: [encrypted[0].to_vec(), encrypted[1].to_vec()],
+        })
+    }
+}
+
+/// Public withdrawal details bound into the proof.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Withdrawal {
     recipient: Pubkey,
     amount: i64,
-    encrypted_note: Vec<u8>,
 }
 
 impl Withdrawal {
-    /// Validates withdrawal data.
+    /// Validates a withdrawal destination and amount.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Withdrawal`] for a zero or unrepresentable amount, or an oversized note.
-    pub fn new(recipient: Pubkey, amount: u64, encrypted_note: Vec<u8>) -> Result<Self, Error> {
+    /// Returns [`Error::Withdrawal`] for a zero or unrepresentable amount.
+    pub fn new(recipient: Pubkey, amount: u64) -> Result<Self, Error> {
         if amount == 0 {
             return Err(Error::Withdrawal("amount must be greater than zero"));
         }
-        if encrypted_note.len() > MAX_ENCRYPTED_NOTE_LEN {
-            return Err(Error::Withdrawal("encrypted note exceeds 128 bytes"));
-        }
         let amount = i64::try_from(amount)
             .map_err(|_| Error::Withdrawal("amount exceeds the signed protocol range"))?;
-        Ok(Self {
-            recipient,
-            amount,
-            encrypted_note,
-        })
+        Ok(Self { recipient, amount })
     }
 
     /// Returns the recipient wallet.
@@ -140,13 +153,7 @@ impl Withdrawal {
         self.amount.unsigned_abs()
     }
 
-    /// Returns the encrypted output note.
-    #[must_use]
-    pub fn encrypted_note(&self) -> &[u8] {
-        &self.encrypted_note
-    }
-
-    pub(crate) const fn public_amount(&self) -> i64 {
+    pub(crate) const fn public_amount(self) -> i64 {
         -self.amount
     }
 }
@@ -165,19 +172,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_pool_as_withdrawal_recipient() -> Result<(), Error> {
+    fn derives_versioned_pool_addresses() -> Result<(), Error> {
+        let program = Pubkey::new_from_array([1; 32]);
         let pool = Pool::new(
-            Pubkey::new_from_array([1; 32]),
+            program,
             Pubkey::new_from_array([2; 32]),
             Pubkey::new_from_array([3; 32]),
             [4; 32],
         )?;
-        let withdrawal = Withdrawal::new(pool.address(), 1, Vec::new())?;
-
-        assert!(matches!(
-            pool.bind(&withdrawal),
-            Err(Error::Withdrawal("recipient resolves to the pool vault"))
-        ));
+        let (expected, _) = Pubkey::find_program_address(&[b"pool", b"v4"], &program);
+        assert_eq!(pool.address(), expected);
         Ok(())
     }
 }

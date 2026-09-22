@@ -135,7 +135,7 @@ with real funds.**
 ## Repository layout
 
 ```text
-circuits/transaction/   Noir circuit for the 1-in/1-out transaction (+ tests)
+circuits/transaction/   Noir circuit for the fixed 2-in/2-out transaction (+ tests)
 onchain/                Anchor workspace
   programs/pool/        the shielded pool program (shield, transact)
 docs/research/          prior-art + reference analysis (Tornado Nova, RAILGUN, disclosure)
@@ -145,8 +145,8 @@ docs/plans/             phased implementation plans
 
 ## Build and test
 
-Prerequisites: Rust, [Solana CLI](https://docs.solana.com/cli), [Anchor](https://www.anchor-lang.com/)
-0.32, and [Noir / `nargo`](https://noir-lang.org/).
+Prerequisites: Rust, Agave/Solana CLI 4.2 or newer (for transaction v1),
+[Anchor](https://www.anchor-lang.com/) 0.32, and [Noir / `nargo`](https://noir-lang.org/).
 
 ```bash
 # Circuit — unit tests

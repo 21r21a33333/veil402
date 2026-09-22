@@ -113,11 +113,11 @@ fn initialization_enforces_configuration_and_layout() -> Result<()> {
     let tx = Transaction {
         proof: vec![1; PROOF_BYTES],
         root,
-        nullifier: field(1),
-        out_commitment: field(2),
+        nullifiers: [field(1), field(2)],
+        out_commitments: [field(3), field(4)],
         amount: 0,
         recipient,
-        encrypted_note: Vec::new(),
+        encrypted_notes: [Vec::new(), Vec::new()],
         recipient_ata,
         verifier: system_program::id(),
         mint,
@@ -133,9 +133,11 @@ fn initialization_enforces_configuration_and_layout() -> Result<()> {
     )
     .is_err());
     assert_eq!(tree_state(&client, &config.tree())?, before);
-    assert!(client
-        .get_account(&nullifier_address(config.address(), &tx.nullifier))
-        .is_err());
+    for nullifier in tx.nullifiers {
+        assert!(client
+            .get_account(&nullifier_address(config.address(), &nullifier))
+            .is_err());
+    }
     Ok(())
 }
 
@@ -265,11 +267,11 @@ fn public_leg_verifier_and_proof_boundaries_are_atomic() -> Result<()> {
 
     // T7: 128 ciphertext bytes is accepted; 129 is rejected atomically.
     let mut note_128 = fixture.transaction(12)?;
-    note_128.encrypted_note = vec![1; 128];
+    note_128.encrypted_notes = [vec![1; 128], vec![2; 128]];
     fixture.transact(&note_128)?;
 
     let mut note_129 = fixture.transaction(13)?;
-    note_129.encrypted_note = vec![1; 129];
+    note_129.encrypted_notes[1] = vec![1; 129];
     fixture.assert_transaction_rejected(&note_129)?;
 
     // V1: callers cannot replace the verifier selected during initialization.
@@ -290,15 +292,15 @@ fn public_leg_verifier_and_proof_boundaries_are_atomic() -> Result<()> {
         fixture.assert_transaction_rejected(&tx)?;
     }
 
-    // T3/V3: a valid zero-flow transaction appends its output and spends its
-    // nullifier without changing either token balance.
+    // T3/V3: a valid zero-flow transaction appends both outputs and spends both
+    // nullifiers without changing either token balance.
     let before = fixture.snapshot(fixture.recipient_ata)?;
     let exact = fixture.transaction(19)?;
     fixture.transact(&exact)?;
     let after = fixture.snapshot(fixture.recipient_ata)?;
     assert_eq!(after.vault, before.vault);
     assert_eq!(after.recipient, before.recipient);
-    assert_eq!(after.tree.next_index, before.tree.next_index + 1);
+    assert_eq!(after.tree.next_index, before.tree.next_index + 2);
     Ok(())
 }
 
@@ -362,20 +364,27 @@ fn nullifiers_and_withdrawals_are_atomic() -> Result<()> {
     )?;
     fixture.shield(field(1), 100, Vec::new())?;
 
-    // N1-N3: the first spend creates its nullifier PDA; replay fails even when
-    // the attacker changes the output commitment.
+    // N1-N3: the first spend creates both nullifier PDAs; replay fails even when
+    // the attacker changes an output commitment.
     let first = fixture.transaction(200)?;
     fixture.transact(&first)?;
     assert!(fixture
         .client
         .get_account(&nullifier_address(
             fixture.config.address(),
-            &first.nullifier
+            &first.nullifiers[0]
+        ))
+        .is_ok());
+    assert!(fixture
+        .client
+        .get_account(&nullifier_address(
+            fixture.config.address(),
+            &first.nullifiers[1]
         ))
         .is_ok());
     fixture.assert_transaction_rejected(&first)?;
     let mut changed_output = first.clone();
-    changed_output.out_commitment = field(9_999);
+    changed_output.out_commitments[0] = field(9_999);
     fixture.assert_transaction_rejected(&changed_output)?;
 
     // N6: the pool address is part of nullifier PDA derivation, so the same
@@ -386,8 +395,8 @@ fn nullifiers_and_withdrawals_are_atomic() -> Result<()> {
         nullifier_address(alternate_pool, &field(201))
     );
 
-    // Two 388-byte proofs cannot fit in Solana's 1,232-byte packet, so distinct
-    // spends are submitted separately. Replay remains atomic per transaction.
+    // Independent spends remain separate atomic state transitions even though
+    // v1 has enough wire capacity to carry more than one proof instruction.
     let tx_a = fixture.transaction(202)?;
     fixture.transact(&tx_a)?;
     let tx_b = fixture.transaction(203)?;

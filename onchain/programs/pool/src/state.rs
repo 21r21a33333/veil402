@@ -115,6 +115,8 @@ pub enum PoolError {
     InvalidField,
     #[msg("nullifier must not be zero")]
     ZeroNullifier,
+    #[msg("input nullifiers must be distinct")]
+    DuplicateNullifier,
     #[msg("withdrawal recipient must not be the pool vault")]
     SelfTransfer,
 }

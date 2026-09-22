@@ -9,17 +9,20 @@ use state::*;
 
 declare_id!("D5JudnUPhvtNhVX7g6zYY8E4XcQBhLHgosAGB6mnhqrK");
 
-const BINDING_DOMAIN: &[u8] = b"veil402:transact:v1";
+const BINDING_DOMAIN: &[u8] = b"veil402:transact:v4";
+const VERSION_SEED: &[u8] = b"v4";
+const NOTE_DOMAIN: u64 = 5;
+const ASSET_DOMAIN: u64 = 7;
 
 // Veil402 shielded pool. Notes are hidden UTXOs whose commitments live in an audited Poseidon
 // Merkle tree (Light Protocol's light-concurrent-merkle-tree, reused as-is). Spending reveals a
 // nullifier + a Groth16 proof verified by CPI into the Sunspot verifier.
 
-/// Public withdrawal data bound into the proof.
+/// Public transaction data bound into the proof.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ExtData {
     pub recipient: Pubkey,
-    pub encrypted_note: Vec<u8>,
+    pub encrypted_notes: [Vec<u8>; 2],
 }
 
 impl ExtData {
@@ -28,10 +31,14 @@ impl ExtData {
         domain: &[u8; 32],
         pool: &Pubkey,
         mint: &Pubkey,
+        verifier: &Pubkey,
         ext_amount: i64,
     ) -> Result<[u8; 32]> {
         let amount = ext_amount.to_be_bytes();
-        let length = u32::try_from(self.encrypted_note.len())
+        let first_len = u32::try_from(self.encrypted_notes[0].len())
+            .map_err(|_| error!(PoolError::NoteTooLarge))?
+            .to_be_bytes();
+        let second_len = u32::try_from(self.encrypted_notes[1].len())
             .map_err(|_| error!(PoolError::NoteTooLarge))?
             .to_be_bytes();
         Ok(util::keccak_field(&[
@@ -40,35 +47,39 @@ impl ExtData {
             crate::ID.as_ref(),
             pool.as_ref(),
             mint.as_ref(),
+            verifier.as_ref(),
             self.recipient.as_ref(),
             &amount,
-            &length,
-            &self.encrypted_note,
+            &first_len,
+            &self.encrypted_notes[0],
+            &second_len,
+            &self.encrypted_notes[1],
         ]))
     }
 }
 
 fn asset_id_of(mint: &Pubkey) -> Result<[u8; 32]> {
     let (high, low) = util::split32(&mint.to_bytes());
-    util::poseidon(&[&high, &low])
+    util::poseidon(&[&util::u64_be32(ASSET_DOMAIN), &high, &low])
 }
 
-/// Public witness assembled from checked values: 12-byte gnark header (5 inputs), then
-/// root, nullifier, out_commitment, public_amount, ext_data_hash.
+/// Public witness assembled from checked values: a 12-byte gnark header followed by seven fields.
 fn public_witness(
     root: &[u8; 32],
-    nullifier: &[u8; 32],
-    out_commitment: &[u8; 32],
+    nullifiers: &[[u8; 32]; 2],
+    out_commitments: &[[u8; 32]; 2],
     public_amount: &[u8; 32],
     edh: &[u8; 32],
-) -> [u8; 172] {
-    let mut pw = [0u8; 172];
-    pw[0..12].copy_from_slice(&[0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 5]);
+) -> [u8; 236] {
+    let mut pw = [0u8; 236];
+    pw[0..12].copy_from_slice(&[0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 7]);
     pw[12..44].copy_from_slice(root);
-    pw[44..76].copy_from_slice(nullifier);
-    pw[76..108].copy_from_slice(out_commitment);
-    pw[108..140].copy_from_slice(public_amount);
-    pw[140..172].copy_from_slice(edh);
+    pw[44..76].copy_from_slice(&nullifiers[0]);
+    pw[76..108].copy_from_slice(&nullifiers[1]);
+    pw[108..140].copy_from_slice(&out_commitments[0]);
+    pw[140..172].copy_from_slice(&out_commitments[1]);
+    pw[172..204].copy_from_slice(public_amount);
+    pw[204..236].copy_from_slice(edh);
     pw
 }
 
@@ -128,8 +139,12 @@ pub mod pool {
             amount,
         )?;
 
-        let commitment =
-            util::poseidon(&[&npk, &ctx.accounts.pool.asset_id, &util::u64_be32(amount)])?;
+        let commitment = util::poseidon(&[
+            &util::u64_be32(NOTE_DOMAIN),
+            &npk,
+            &ctx.accounts.pool.asset_id,
+            &util::u64_be32(amount),
+        ])?;
         let leaf_index = state::append_leaf(&ctx.accounts.tree.to_account_info(), &commitment)?;
         emit!(NewCommitment {
             commitment,
@@ -143,8 +158,8 @@ pub mod pool {
         ctx: Context<Transact>,
         proof: Vec<u8>,
         root: [u8; 32],
-        nullifier: [u8; 32],
-        out_commitment: [u8; 32],
+        nullifiers: [[u8; 32]; 2],
+        out_commitments: [[u8; 32]; 2],
         ext_amount: i64,
         ext_data: ExtData,
     ) -> Result<()> {
@@ -154,13 +169,23 @@ pub mod pool {
         require!(proof.len() == PROOF_BYTES, PoolError::InvalidProofLength);
         require!(
             util::is_canonical_field(&root)
-                && util::is_canonical_field(&nullifier)
-                && util::is_canonical_field(&out_commitment),
+                && nullifiers.iter().all(util::is_canonical_field)
+                && out_commitments.iter().all(util::is_canonical_field),
             PoolError::InvalidField
         );
-        require!(nullifier != [0; 32], PoolError::ZeroNullifier);
         require!(
-            ext_data.encrypted_note.len() <= MAX_ENCRYPTED_NOTE_LEN,
+            nullifiers.iter().all(|nullifier| *nullifier != [0; 32]),
+            PoolError::ZeroNullifier
+        );
+        require!(
+            nullifiers[0] != nullifiers[1],
+            PoolError::DuplicateNullifier
+        );
+        require!(
+            ext_data
+                .encrypted_notes
+                .iter()
+                .all(|note| note.len() <= MAX_ENCRYPTED_NOTE_LEN),
             PoolError::NoteTooLarge
         );
         if ext_amount < 0 {
@@ -188,19 +213,21 @@ pub mod pool {
             &ctx.accounts.pool.domain,
             &ctx.accounts.pool.key(),
             &ctx.accounts.pool.mint,
+            &ctx.accounts.pool.verifier,
             ext_amount,
         )?;
         let witness = public_witness(
             &root,
-            &nullifier,
-            &out_commitment,
+            &nullifiers,
+            &out_commitments,
             &public_amount,
             &external_data_hash,
         );
         verify_cpi(&ctx.accounts.verifier_program, &proof, &witness)?;
 
         // 3. Spend the nullifier (PDA `init` = double-spend guard).
-        ctx.accounts.nullifier_record.nullifier = nullifier;
+        ctx.accounts.nullifier_0_record.nullifier = nullifiers[0];
+        ctx.accounts.nullifier_1_record.nullifier = nullifiers[1];
 
         // 4. Pay out on withdrawal (vault PDA signs); recipient is bound in ext_data_hash.
         if ext_amount < 0 {
@@ -215,7 +242,7 @@ pub mod pool {
                 PoolError::RecipientMismatch
             );
             let bump = ctx.accounts.pool.bump;
-            let seeds: &[&[u8]] = &[b"pool", core::slice::from_ref(&bump)];
+            let seeds: &[&[u8]] = &[b"pool", VERSION_SEED, core::slice::from_ref(&bump)];
             token::transfer(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_program.to_account_info(),
@@ -230,23 +257,32 @@ pub mod pool {
             )?;
         }
 
-        // 5. Append the output commitment + emit.
-        let leaf_index = state::append_leaf(&ctx.accounts.tree.to_account_info(), &out_commitment)?;
-        emit!(NewCommitment {
-            commitment: out_commitment,
-            leaf_index,
-            encrypted_note: ext_data.encrypted_note
+        // 5. Append both outputs and spend both nullifiers atomically.
+        for (commitment, encrypted_note) in
+            out_commitments.into_iter().zip(ext_data.encrypted_notes)
+        {
+            let leaf_index = state::append_leaf(&ctx.accounts.tree.to_account_info(), &commitment)?;
+            emit!(NewCommitment {
+                commitment,
+                leaf_index,
+                encrypted_note
+            });
+        }
+        emit!(NewNullifier {
+            nullifier: nullifiers[0]
         });
-        emit!(NewNullifier { nullifier });
+        emit!(NewNullifier {
+            nullifier: nullifiers[1]
+        });
         Ok(())
     }
 }
 
 #[derive(Accounts)]
 pub struct InitPool<'info> {
-    #[account(init, payer = authority, space = 8 + Pool::INIT_SPACE, seeds = [b"pool"], bump)]
+    #[account(init, payer = authority, space = 8 + Pool::INIT_SPACE, seeds = [b"pool", VERSION_SEED], bump)]
     pub pool: Account<'info, Pool>,
-    #[account(init, payer = authority, space = 8 + TREE_BYTES, seeds = [b"tree"], bump)]
+    #[account(init, payer = authority, space = 8 + TREE_BYTES, seeds = [b"tree", pool.key().as_ref()], bump)]
     pub tree: Account<'info, MerkleTree>,
     pub mint: Account<'info, Mint>,
     #[account(init, payer = authority, associated_token::mint = mint, associated_token::authority = pool)]
@@ -263,9 +299,9 @@ pub struct InitPool<'info> {
 
 #[derive(Accounts)]
 pub struct Shield<'info> {
-    #[account(seeds = [b"pool"], bump = pool.bump)]
+    #[account(seeds = [b"pool", VERSION_SEED], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
-    #[account(mut, seeds = [b"tree"], bump)]
+    #[account(mut, seeds = [b"tree", pool.key().as_ref()], bump)]
     pub tree: Account<'info, MerkleTree>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = pool)]
     pub vault: Account<'info, TokenAccount>,
@@ -279,18 +315,20 @@ pub struct Shield<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(proof: Vec<u8>, root: [u8; 32], nullifier: [u8; 32])]
+#[instruction(proof: Vec<u8>, root: [u8; 32], nullifiers: [[u8; 32]; 2])]
 pub struct Transact<'info> {
-    #[account(seeds = [b"pool"], bump = pool.bump)]
+    #[account(seeds = [b"pool", VERSION_SEED], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
-    #[account(mut, seeds = [b"tree"], bump)]
+    #[account(mut, seeds = [b"tree", pool.key().as_ref()], bump)]
     pub tree: Account<'info, MerkleTree>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = pool)]
     pub vault: Account<'info, TokenAccount>,
     #[account(address = pool.mint)]
     pub mint: Account<'info, Mint>,
-    #[account(init, payer = payer, space = 8 + NullifierRecord::INIT_SPACE, seeds = [b"nullifier", pool.key().as_ref(), nullifier.as_ref()], bump)]
-    pub nullifier_record: Account<'info, NullifierRecord>,
+    #[account(init, payer = payer, space = 8 + NullifierRecord::INIT_SPACE, seeds = [b"nullifier", pool.key().as_ref(), nullifiers[0].as_ref()], bump)]
+    pub nullifier_0_record: Account<'info, NullifierRecord>,
+    #[account(init, payer = payer, space = 8 + NullifierRecord::INIT_SPACE, seeds = [b"nullifier", pool.key().as_ref(), nullifiers[1].as_ref()], bump)]
+    pub nullifier_1_record: Account<'info, NullifierRecord>,
     #[account(mut, token::mint = mint)]
     pub recipient_ata: Account<'info, TokenAccount>,
     /// CHECK: executable and validated against pool.verifier before the CPI.

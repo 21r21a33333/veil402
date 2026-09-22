@@ -11,7 +11,6 @@ use light_hasher::Poseidon;
 use solana_client::{rpc_client::RpcClient, rpc_config::RpcTransactionConfig};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     program_pack::Pack,
     pubkey::Pubkey,
@@ -25,6 +24,8 @@ use solana_transaction_status_client_types::{
 use spl_associated_token_account::{
     get_associated_token_address, instruction::create_associated_token_account,
 };
+
+use crate::v1;
 
 pub type Result<T> = std::result::Result<T, Box<dyn StdError>>;
 
@@ -141,16 +142,8 @@ pub fn send_with_signature(
     payer: &Keypair,
     nonce: u64,
 ) -> Result<Signature> {
-    send_all_with_signature(
-        client,
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(650_000),
-            ComputeBudgetInstruction::set_compute_unit_price(nonce),
-            instruction,
-        ],
-        payer,
-        &[payer],
-    )
+    let transaction = v1::build(&client.url(), instruction, payer, nonce)?;
+    v1::send(&client.url(), &transaction)
 }
 
 pub fn send_all(
@@ -185,7 +178,7 @@ pub fn confirmed_transaction(
             RpcTransactionConfig {
                 encoding: Some(UiTransactionEncoding::Json),
                 commitment: Some(CommitmentConfig::confirmed()),
-                max_supported_transaction_version: Some(0),
+                max_supported_transaction_version: Some(1),
             },
         ) {
             Ok(transaction) => return Ok(transaction),
