@@ -9,7 +9,7 @@ use zeroize::Zeroize;
 use super::Artifacts;
 use crate::{
     client::Error,
-    protocol::{Field, PublicInputs, Transaction, TransactionValues},
+    protocol::{Field, Plan, Public, PublicInputs, Values},
 };
 
 pub(crate) struct Witness {
@@ -24,8 +24,12 @@ impl Drop for Witness {
 }
 
 impl Witness {
-    pub(crate) fn build(artifacts: &Artifacts, transaction: &Transaction) -> Result<Self, Error> {
-        let values = transaction.values()?;
+    pub(crate) fn build(
+        artifacts: &Artifacts,
+        transaction: &Plan,
+        public: &Public,
+    ) -> Result<Self, Error> {
+        let values = transaction.values(public)?;
         let input = input_map(transaction, &values);
         let initial = artifacts
             .program
@@ -51,55 +55,86 @@ impl Witness {
     }
 }
 
-fn input_map(transaction: &Transaction, values: &TransactionValues) -> InputMap {
+fn input_map(transaction: &Plan, values: &Values) -> InputMap {
     let public = &values.public;
     let mut input = BTreeMap::new();
     input.insert("root".into(), value(public.root));
-    input.insert("nullifier".into(), value(public.nullifier));
-    input.insert("out_commitment".into(), value(public.commitment));
+    input.insert("nullifiers".into(), fields(&public.nullifiers));
+    input.insert("out_commitments".into(), fields(&public.commitments));
     input.insert("public_amount".into(), value(public.amount));
     input.insert("ext_data_hash".into(), value(public.hash));
     input.insert("bound_hash".into(), value(public.hash));
     input.insert(
-        "in_value".into(),
-        value(Field::from(transaction.input.note.value)),
+        "in_values".into(),
+        fields(
+            &transaction
+                .spends
+                .each_ref()
+                .map(|spend| Field::from(spend.note.value)),
+        ),
     );
-    input.insert("asset_id".into(), value(transaction.input.note.asset));
+    input.insert("asset_id".into(), value(transaction.asset));
     input.insert(
         "in_random".into(),
-        value(transaction.input.note.random.expose()),
+        fields(
+            &transaction
+                .spends
+                .each_ref()
+                .map(|spend| spend.note.random.expose()),
+        ),
     );
     input.insert(
-        "spending_key".into(),
-        value(transaction.input.owner.spend.expose()),
+        "spending_keys".into(),
+        fields(
+            &transaction
+                .spends
+                .each_ref()
+                .map(|spend| spend.owner.spend.expose()),
+        ),
     );
     input.insert(
-        "viewing_key".into(),
-        value(transaction.input.owner.view.expose()),
+        "viewing_keys".into(),
+        fields(
+            &transaction
+                .spends
+                .each_ref()
+                .map(|spend| spend.owner.view.expose()),
+        ),
     );
     input.insert(
-        "leaf_index".into(),
-        value(Field::from(u64::from(transaction.input.merkle.index))),
+        "leaf_indices".into(),
+        fields(
+            &transaction
+                .spends
+                .each_ref()
+                .map(|spend| Field::from(u64::from(spend.merkle.index))),
+        ),
     );
     input.insert(
         "siblings".into(),
         InputValue::Vec(
             transaction
-                .input
-                .merkle
-                .siblings
+                .spends
                 .iter()
-                .copied()
-                .map(value)
+                .map(|spend| fields(&spend.merkle.siblings))
                 .collect(),
         ),
     );
-    input.insert("out_npk".into(), value(values.output_key));
+    input.insert("out_npks".into(), fields(&values.output_keys));
     input.insert(
-        "out_value".into(),
-        value(Field::from(transaction.send.value)),
+        "out_values".into(),
+        fields(
+            &transaction
+                .sends
+                .each_ref()
+                .map(|send| Field::from(send.value)),
+        ),
     );
     input
+}
+
+fn fields<const N: usize>(values: &[Field; N]) -> InputValue {
+    InputValue::Vec(values.iter().copied().map(value).collect())
 }
 
 fn value(field: Field) -> InputValue {

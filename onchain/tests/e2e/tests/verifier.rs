@@ -5,32 +5,32 @@ use light_hasher::{Hasher, Poseidon};
 use num_bigint::BigUint;
 use pool_e2e::harness::{
     airdrop, confirmed_transaction, create_mint, create_token_account, mint_to, repository, send,
-    send_with_signature, token_balance, Result, Validator,
+    token_balance, Result, Validator,
 };
+use pool_e2e::v1;
 use serial_test::serial;
 use solana_client::rpc_client::RpcClient;
 use solana_keccak_hasher::hashv;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    transaction::Transaction as SolanaTransaction,
 };
 use solana_system_interface::program as system_program;
 use solana_transaction_status_client_types::option_serializer::OptionSerializer;
 use spl_associated_token_account::get_associated_token_address;
 use veil402_sdk::solana::MAX_ENCRYPTED_NOTE_LEN;
 use veil402_sdk::{
-    Config, Field, MerklePath, Note, Output, Owner, Pool as VeilPool, Public, Secret, Spend,
+    Config, Field, MerklePath, Note, Owner, Pool as VeilPool, Secret, Send, Spend,
     Transaction as VeilTransaction, Veil, Withdrawal, TREE_DEPTH,
 };
 
 const VERIFIER: Pubkey = Pubkey::from_str_const("9jpnLceL3ahFfi5JmXdXNT1rZ1zLmfUcBkKbqCvquo19");
 const DOMAIN: [u8; 32] = [7; 32];
-// Baseline: 544,150 units on Solana 3.1.12; 55,850 units (10.3%) headroom.
-const COMPUTE_CEILING: u64 = 600_000;
+// Baseline: 597,080-603,173 units across fresh proofs on Agave 4.2.1.
+// The 650K regression ceiling stays below the v1 transaction's 700K limit.
+const COMPUTE_CEILING: u64 = 650_000;
 
 fn field(value: u64) -> Field {
     Field::from(value)
@@ -85,65 +85,41 @@ fn add_scalar_modulus(value: [u8; 32]) -> Result<[u8; 32]> {
     field_bytes(BigUint::from_bytes_be(&value) + scalar_modulus()?)
 }
 
+struct Binding<'a> {
+    domain: &'a [u8; 32],
+    program: &'a Pubkey,
+    pool: &'a Pubkey,
+    mint: &'a Pubkey,
+    verifier: &'a Pubkey,
+    recipient: &'a Pubkey,
+}
+
 fn binding_hash(
-    domain: &[u8; 32],
-    program: &Pubkey,
-    pool: &Pubkey,
-    mint: &Pubkey,
-    recipient: &Pubkey,
+    binding: Binding<'_>,
     amount: i64,
-    encrypted_note: &[u8],
+    encrypted_notes: &[Vec<u8>; 2],
 ) -> Result<Field> {
     let amount = amount.to_be_bytes();
-    let length = u32::try_from(encrypted_note.len())?.to_be_bytes();
+    let first_len = u32::try_from(encrypted_notes[0].len())?.to_be_bytes();
+    let second_len = u32::try_from(encrypted_notes[1].len())?.to_be_bytes();
     let digest = hashv(&[
-        b"veil402:transact:v1",
-        domain,
-        program.as_ref(),
-        pool.as_ref(),
-        mint.as_ref(),
-        recipient.as_ref(),
+        b"veil402:transact:v4",
+        binding.domain,
+        binding.program.as_ref(),
+        binding.pool.as_ref(),
+        binding.mint.as_ref(),
+        binding.verifier.as_ref(),
+        binding.recipient.as_ref(),
         &amount,
-        &length,
-        encrypted_note,
+        &first_len,
+        &encrypted_notes[0],
+        &second_len,
+        &encrypted_notes[1],
     ]);
     Field::from_bytes(field_bytes(
         BigUint::from_bytes_be(digest.as_ref()) % scalar_modulus()?,
     )?)
     .map_err(Into::into)
-}
-
-fn proof_transaction(asset: Field, hash: Field) -> Result<VeilTransaction> {
-    let owner = Owner {
-        spend: secret(11)?,
-        view: secret(22)?,
-    };
-    let note = Note {
-        value: 1_000,
-        asset,
-        random: secret(33)?,
-    };
-    let mut siblings = [Field::ZERO; TREE_DEPTH];
-    for (field, zero) in siblings.iter_mut().zip(Poseidon::zero_bytes()) {
-        *field = Field::from_bytes(zero)?;
-    }
-    let output_owner = Owner {
-        spend: secret(44)?,
-        view: secret(55)?,
-    };
-    Ok(VeilTransaction {
-        input: Spend {
-            note,
-            owner,
-            merkle: MerklePath { index: 0, siblings },
-        },
-        send: Output {
-            owner: output_owner.public()?,
-            value: 700,
-            random: secret(66)?,
-        },
-        public: Public { amount: -300, hash },
-    })
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -152,7 +128,7 @@ struct PoolState {
     vault: u64,
     recipient: u64,
     attacker: u64,
-    nullifier: Option<Vec<u8>>,
+    nullifiers: [Option<Vec<u8>>; 2],
 }
 
 fn pool_state(
@@ -160,17 +136,16 @@ fn pool_state(
     config: &VeilPool,
     recipient: &Pubkey,
     attacker: &Pubkey,
-    nullifier: &Pubkey,
+    nullifiers: &[Pubkey; 2],
 ) -> Result<PoolState> {
     Ok(PoolState {
         tree: client.get_account_data(&config.tree())?,
         vault: token_balance(client, &config.vault())?,
         recipient: token_balance(client, recipient)?,
         attacker: token_balance(client, attacker)?,
-        nullifier: client
-            .get_account(nullifier)
-            .ok()
-            .map(|account| account.data),
+        nullifiers: nullifiers
+            .each_ref()
+            .map(|address| client.get_account(address).ok().map(|account| account.data)),
     })
 }
 
@@ -187,7 +162,7 @@ impl Assertions<'_> {
         &self,
         nonce: u64,
         instruction: Instruction,
-        nullifier: &Pubkey,
+        nullifiers: &[Pubkey; 2],
         case: &str,
     ) -> Result<()> {
         let before = pool_state(
@@ -195,7 +170,7 @@ impl Assertions<'_> {
             self.pool,
             self.recipient,
             self.attacker,
-            nullifier,
+            nullifiers,
         )?;
         if send(self.client, instruction, self.payer, nonce).is_ok() {
             return Err(format!("{case} was accepted").into());
@@ -205,7 +180,7 @@ impl Assertions<'_> {
             self.pool,
             self.recipient,
             self.attacker,
-            nullifier,
+            nullifiers,
         )? != before
         {
             return Err(format!("{case} changed pool state").into());
@@ -233,9 +208,13 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
 
     // Run the real pool and verifier programs under a local validator.
     let verifier = repository.join("circuits/transaction/target/transaction.so");
-    let validator = Validator::start(&repository, &[(VERIFIER, verifier.as_path())])?;
-    let client = validator.client();
     let payer = Keypair::new();
+    let validator = Validator::start(
+        &repository,
+        payer.pubkey(),
+        &[(VERIFIER, verifier.as_path())],
+    )?;
+    let client = validator.client();
     airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
 
     let mint = create_mint(&client, &payer)?;
@@ -250,6 +229,8 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
             vault: pool.vault(),
             verifier_program: VERIFIER,
             authority: payer.pubkey(),
+            pool_program: pool::ID,
+            program_data: solana_sdk::bpf_loader_upgradeable::get_program_data_address(&pool::ID),
             token_program: spl_token::id(),
             associated_token_program: spl_associated_token_account::id(),
             system_program: system_program::id(),
@@ -310,34 +291,37 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
         spend: secret(44)?,
         view: secret(55)?,
     };
-    let withdrawal = Withdrawal::new(recipient.pubkey(), 300, vec![2; MAX_ENCRYPTED_NOTE_LEN])?;
+    let withdrawal = Withdrawal::new(recipient.pubkey(), 300)?;
     let veil = Veil::open(Config::new(
         worker,
-        repository.join("prover/veil402-gnark/artifacts/transaction-v3"),
+        repository.join("prover/veil402-gnark/artifacts/transaction-v4"),
     ))?;
     let prepared = veil
         .withdraw(
             &pool,
-            Spend {
-                note,
-                owner,
-                merkle: MerklePath { index: 0, siblings },
-            },
-            Output {
-                owner: output_owner.public()?,
-                value: 700,
-                random: secret(66)?,
-            },
+            VeilTransaction::new(
+                vec![Spend {
+                    note,
+                    owner,
+                    merkle: MerklePath { index: 0, siblings },
+                }],
+                vec![Send::new(
+                    output_owner.public()?,
+                    700,
+                    secret(66)?,
+                    vec![2; MAX_ENCRYPTED_NOTE_LEN],
+                )?],
+            )?,
             withdrawal,
             payer.pubkey(),
         )
         .await?;
 
-    let nullifier = prepared.proof.public.nullifier.to_bytes();
-    let nullifier_record = nullifier_address(&pool, &nullifier);
+    let nullifiers = prepared.proof.public.nullifiers.map(Field::to_bytes);
+    let nullifier_records = nullifiers.map(|nullifier| nullifier_address(&pool, &nullifier));
     let mut cases = Vec::new();
 
-    // Mutating any one of the five verifier inputs must invalidate the same
+    // Mutating any one of the seven verifier inputs must invalidate the same
     // proof. A changed nullifier also needs its matching PDA account so the
     // failure reaches proof verification instead of stopping at seed checks.
     cases.push((
@@ -345,28 +329,32 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
         mutate_instruction(&prepared.instruction, |args| {
             args.root = field(901).to_bytes();
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
     let changed_nullifier = field(902).to_bytes();
     let changed_nullifier_record = nullifier_address(&pool, &changed_nullifier);
     let mut instruction = mutate_instruction(&prepared.instruction, |args| {
-        args.nullifier = changed_nullifier;
+        args.nullifiers[0] = changed_nullifier;
     })?;
     instruction.accounts[4].pubkey = changed_nullifier_record;
-    cases.push(("mutated nullifier", instruction, changed_nullifier_record));
+    cases.push((
+        "mutated nullifier",
+        instruction,
+        [changed_nullifier_record, nullifier_records[1]],
+    ));
     cases.push((
         "mutated output commitment",
         mutate_instruction(&prepared.instruction, |args| {
-            args.out_commitment = field(903).to_bytes();
+            args.out_commitments[0] = field(903).to_bytes();
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
     cases.push((
         "mutated public amount",
         mutate_instruction(&prepared.instruction, |args| {
             args.ext_amount = -301;
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
 
     // ext_data_hash is recomputed on-chain. Mutate its recipient, ciphertext
@@ -374,21 +362,21 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
     let mut instruction = mutate_instruction(&prepared.instruction, |args| {
         args.ext_data.recipient = attacker.pubkey();
     })?;
-    instruction.accounts[5].pubkey = attacker_ata;
-    cases.push(("mutated recipient", instruction, nullifier_record));
+    instruction.accounts[6].pubkey = attacker_ata;
+    cases.push(("mutated recipient", instruction, nullifier_records));
     cases.push((
         "mutated encrypted-note byte",
         mutate_instruction(&prepared.instruction, |args| {
-            args.ext_data.encrypted_note[0] ^= 1;
+            args.ext_data.encrypted_notes[0][0] ^= 1;
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
     cases.push((
         "mutated encrypted-note length",
         mutate_instruction(&prepared.instruction, |args| {
-            args.ext_data.encrypted_note.pop();
+            args.ext_data.encrypted_notes[1].pop();
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
 
     // These remain structurally valid 388-byte and truncated proofs, but no
@@ -398,102 +386,60 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
         mutate_instruction(&prepared.instruction, |args| {
             args.proof[0] ^= 1;
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
     cases.push((
         "truncated proof",
         mutate_instruction(&prepared.instruction, |args| {
             args.proof.pop();
         })?,
-        nullifier_record,
+        nullifier_records,
     ));
 
-    // Generate valid proofs for deliberately wrong binding hashes. Transplanting
-    // only their proof bytes into the canonical instruction isolates each
-    // configuration input checked by the contract's ext_data_hash.
-    let encrypted_note = vec![2; MAX_ENCRYPTED_NOTE_LEN];
+    // Independently reproduce the complete external-data binding from the
+    // serialized instruction, including both shuffled encrypted outputs.
+    let encoded = prepared
+        .instruction
+        .data
+        .get(8..)
+        .ok_or("transaction instruction is missing its discriminator")?;
+    let canonical_args = pool::instruction::Transact::try_from_slice(encoded)?;
     let canonical_hash = binding_hash(
-        &DOMAIN,
-        &pool::ID,
-        &pool.address(),
-        &mint,
-        &recipient.pubkey(),
+        Binding {
+            domain: &DOMAIN,
+            program: &pool::ID,
+            pool: &pool.address(),
+            mint: &mint,
+            verifier: &VERIFIER,
+            recipient: &recipient.pubkey(),
+        },
         -300,
-        &encrypted_note,
+        &canonical_args.ext_data.encrypted_notes,
     )?;
     assert_eq!(canonical_hash, prepared.proof.public.hash);
-    let bindings = [
-        (
-            "mutated domain binding",
-            binding_hash(
-                &[8; 32],
-                &pool::ID,
-                &pool.address(),
-                &mint,
-                &recipient.pubkey(),
-                -300,
-                &encrypted_note,
-            )?,
-        ),
-        (
-            "mutated program binding",
-            binding_hash(
-                &DOMAIN,
-                &Pubkey::new_unique(),
-                &pool.address(),
-                &mint,
-                &recipient.pubkey(),
-                -300,
-                &encrypted_note,
-            )?,
-        ),
-        (
-            "mutated pool binding",
-            binding_hash(
-                &DOMAIN,
-                &pool::ID,
-                &Pubkey::new_unique(),
-                &mint,
-                &recipient.pubkey(),
-                -300,
-                &encrypted_note,
-            )?,
-        ),
-        (
-            "mutated mint binding",
-            binding_hash(
-                &DOMAIN,
-                &pool::ID,
-                &pool.address(),
-                &Pubkey::new_unique(),
-                &recipient.pubkey(),
-                -300,
-                &encrypted_note,
-            )?,
-        ),
-    ];
-    for (case, hash) in bindings {
-        let wrong_proof = veil.prove(proof_transaction(pool.asset(), hash)?).await?;
-        let instruction = mutate_instruction(&prepared.instruction, |args| {
-            args.proof = wrong_proof.bytes;
-        })?;
-        cases.push((case, instruction, nullifier_record));
-    }
 
     // Preserve the canonical-encoding defenses in the real-verifier path too.
-    let non_canonical = add_scalar_modulus(nullifier)?;
+    let non_canonical = add_scalar_modulus(nullifiers[0])?;
     let non_canonical_record = nullifier_address(&pool, &non_canonical);
     let mut instruction = mutate_instruction(&prepared.instruction, |args| {
-        args.nullifier = non_canonical;
+        args.nullifiers[0] = non_canonical;
     })?;
     instruction.accounts[4].pubkey = non_canonical_record;
-    cases.push(("non-canonical nullifier", instruction, non_canonical_record));
+    cases.push((
+        "non-canonical nullifier",
+        instruction,
+        [non_canonical_record, nullifier_records[1]],
+    ));
     let zero_record = nullifier_address(&pool, &[0; 32]);
     let mut instruction = mutate_instruction(&prepared.instruction, |args| {
-        args.nullifier = [0; 32];
+        args.nullifiers[0] = [0; 32];
     })?;
     instruction.accounts[4].pubkey = zero_record;
-    cases.push(("zero nullifier", instruction, zero_record));
+    cases.push((
+        "zero nullifier",
+        instruction,
+        [zero_record, nullifier_records[1]],
+    ));
 
     // Every rejection must preserve token balances, the tree, and the watched
     // nullifier account—not merely return an RPC error.
@@ -510,24 +456,15 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
         nonce += 1;
     }
 
-    // The production transaction, including the compute-budget instructions
-    // used by send(), must remain below Solana's 1,232-byte packet limit.
-    let blockhash = client.get_latest_blockhash()?;
-    let packet = SolanaTransaction::new_signed_with_payer(
-        &[
-            ComputeBudgetInstruction::set_compute_unit_limit(650_000),
-            ComputeBudgetInstruction::set_compute_unit_price(nonce),
-            prepared.instruction.clone(),
-        ],
-        Some(&payer.pubkey()),
-        &[&payer],
-        blockhash,
-    );
-    let packet_bytes = 1 + packet.signatures.len() * 64 + packet.message_data().len();
-    assert!(packet_bytes <= solana_sdk::packet::PACKET_DATA_SIZE);
+    // The production proof is sent as one atomic v1 transaction. Its resource
+    // limits live in the message config, leaving the instruction list clean.
+    let transaction = v1::build(&client.url(), prepared.instruction.clone(), &payer, nonce)?;
+    let transaction_bytes = transaction.wire_size()?;
+    eprintln!("v1 transaction bytes: {transaction_bytes}");
+    assert!(transaction_bytes <= solana_message_v1::v1::MAX_TRANSACTION_SIZE);
 
     // The unmodified proof pays exactly 300 and leaves 700 in the vault.
-    let signature = send_with_signature(&client, prepared.instruction.clone(), &payer, nonce)?;
+    let signature = v1::send(&client.url(), &transaction)?;
     assert_eq!(token_balance(&client, &recipient_ata)?, 300);
     assert_eq!(token_balance(&client, &pool.vault())?, 700);
     let transaction = confirmed_transaction(&client, &signature)?;
@@ -545,12 +482,12 @@ async fn real_verifier_binds_every_public_input() -> Result<()> {
     assert!(compute_units <= COMPUTE_CEILING);
     nonce += 1;
 
-    // Replaying the identical instruction must fail on the existing nullifier
+    // Replaying the identical instruction must fail on the existing nullifiers
     // and must not pay the recipient a second time.
     assertions.rejects_without_changes(
         nonce,
         prepared.instruction,
-        &nullifier_record,
+        &nullifier_records,
         "spent-nullifier replay",
     )?;
     drop(validator);

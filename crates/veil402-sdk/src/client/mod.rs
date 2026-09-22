@@ -3,9 +3,9 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 use crate::{
-    protocol::{Output, Public, PublicInputs, Spend, Transaction},
+    protocol::{Plan, Public, PublicInputs, Transaction},
     proving::{Artifacts, Witness, Worker},
-    solana::{Pool, Prepared, Withdrawal},
+    solana::{External, Pool, Prepared, Withdrawal},
 };
 use solana_pubkey::Pubkey;
 
@@ -77,17 +77,12 @@ impl Veil {
         })
     }
 
-    /// Generates and locally verifies a proof for a transaction.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`Error`] when validation, witness generation, worker communication, proving,
-    /// local verification, or the configured deadline fails.
-    pub async fn prove(&self, transaction: Transaction) -> Result<Proof, Error> {
+    async fn prove(&self, transaction: Plan, public: Public) -> Result<Proof, Error> {
         let artifacts = Arc::clone(&self.artifacts);
-        let witness = tokio::task::spawn_blocking(move || Witness::build(&artifacts, &transaction))
-            .await
-            .map_err(|_| Error::Witness)??;
+        let witness =
+            tokio::task::spawn_blocking(move || Witness::build(&artifacts, &transaction, &public))
+                .await
+                .map_err(|_| Error::Witness)??;
 
         let mut slot = self.worker.lock().await;
         let mut worker = match slot.take() {
@@ -115,6 +110,24 @@ impl Veil {
         })
     }
 
+    /// Proves a private transfer and builds the exact Solana instruction that consumes it.
+    ///
+    /// Account creation and transaction submission remain the caller's responsibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] when the transaction is invalid, proof generation fails, or the
+    /// resulting instruction cannot be encoded.
+    pub async fn transfer(
+        &self,
+        pool: &Pool,
+        transaction: Transaction,
+        payer: Pubkey,
+    ) -> Result<Prepared, Error> {
+        self.prepare(pool, transaction, pool.address(), 0, payer)
+            .await
+    }
+
     /// Proves a withdrawal and builds the exact Solana instruction that consumes it.
     ///
     /// Account creation and transaction submission remain the caller's responsibility.
@@ -126,23 +139,39 @@ impl Veil {
     pub async fn withdraw(
         &self,
         pool: &Pool,
-        input: Spend,
-        send: Output,
+        transaction: Transaction,
         withdrawal: Withdrawal,
         payer: Pubkey,
     ) -> Result<Prepared, Error> {
+        if withdrawal.recipient() == pool.address() {
+            return Err(Error::Withdrawal("recipient resolves to the pool vault"));
+        }
+        self.prepare(
+            pool,
+            transaction,
+            withdrawal.recipient(),
+            withdrawal.public_amount(),
+            payer,
+        )
+        .await
+    }
+
+    async fn prepare(
+        &self,
+        pool: &Pool,
+        transaction: Transaction,
+        recipient: Pubkey,
+        amount: i64,
+        payer: Pubkey,
+    ) -> Result<Prepared, Error> {
+        let plan = transaction.plan(pool.asset())?;
+        let external = External::new(&plan, recipient)?;
         let public = Public {
-            amount: withdrawal.public_amount(),
-            hash: pool.bind(&withdrawal)?,
+            amount,
+            hash: pool.bind(&external, amount)?,
         };
-        let proof = self
-            .prove(Transaction {
-                input,
-                send,
-                public,
-            })
-            .await?;
-        let instruction = pool.instruction(&proof, &withdrawal, payer)?;
+        let proof = self.prove(plan, public).await?;
+        let instruction = pool.instruction(&proof, &external, amount, payer)?;
         Ok(Prepared { proof, instruction })
     }
 }

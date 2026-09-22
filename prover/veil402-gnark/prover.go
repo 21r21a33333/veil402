@@ -22,7 +22,7 @@ import (
 	sunbn254 "github.com/reilabs/sunspot/go/bn254"
 )
 
-//go:embed artifacts/transaction-v3/manifest.json
+//go:embed artifacts/transaction-v4/manifest.json
 var pinnedManifest []byte
 
 type manifest struct {

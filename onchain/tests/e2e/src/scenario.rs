@@ -45,6 +45,8 @@ pub fn init_instruction(
             vault: config.vault(),
             verifier_program: verifier,
             authority,
+            pool_program: pool::ID,
+            program_data: solana_sdk::bpf_loader_upgradeable::get_program_data_address(&pool::ID),
             token_program: spl_token::id(),
             associated_token_program: spl_associated_token_account::id(),
             system_program: system_program::id(),
@@ -88,11 +90,11 @@ pub fn shield_instruction(
 pub struct Transaction {
     pub proof: Vec<u8>,
     pub root: [u8; 32],
-    pub nullifier: [u8; 32],
-    pub out_commitment: [u8; 32],
+    pub nullifiers: [[u8; 32]; 2],
+    pub out_commitments: [[u8; 32]; 2],
     pub amount: i64,
     pub recipient: Pubkey,
-    pub encrypted_note: Vec<u8>,
+    pub encrypted_notes: [Vec<u8>; 2],
     pub recipient_ata: Pubkey,
     pub verifier: Pubkey,
     pub mint: Pubkey,
@@ -108,7 +110,8 @@ pub fn transact_instruction(config: &VeilPool, payer: Pubkey, tx: &Transaction) 
             tree: tx.tree,
             vault: tx.vault,
             mint: tx.mint,
-            nullifier_record: nullifier_address(config.address(), &tx.nullifier),
+            nullifier_0_record: nullifier_address(config.address(), &tx.nullifiers[0]),
+            nullifier_1_record: nullifier_address(config.address(), &tx.nullifiers[1]),
             recipient_ata: tx.recipient_ata,
             verifier_program: tx.verifier,
             payer,
@@ -119,12 +122,12 @@ pub fn transact_instruction(config: &VeilPool, payer: Pubkey, tx: &Transaction) 
         data: pool::instruction::Transact {
             proof: tx.proof.clone(),
             root: tx.root,
-            nullifier: tx.nullifier,
-            out_commitment: tx.out_commitment,
+            nullifiers: tx.nullifiers,
+            out_commitments: tx.out_commitments,
             ext_amount: tx.amount,
             ext_data: pool::ExtData {
                 recipient: tx.recipient,
-                encrypted_note: tx.encrypted_note.clone(),
+                encrypted_notes: tx.encrypted_notes.clone(),
             },
         }
         .data(),
@@ -156,9 +159,13 @@ impl Fixture {
     pub fn start() -> Result<Self> {
         let repository = repository()?;
         let verifier_path = repository.join("onchain/target/deploy/mock_verifier.so");
-        let validator = Validator::start(&repository, &[(MOCK_VERIFIER, &verifier_path)])?;
-        let client = validator.client();
         let payer = Keypair::new();
+        let validator = Validator::start(
+            &repository,
+            payer.pubkey(),
+            &[(MOCK_VERIFIER, &verifier_path)],
+        )?;
+        let client = validator.client();
         airdrop(&client, &payer.pubkey(), 100 * LAMPORTS_PER_SOL)?;
         let mint = create_mint(&client, &payer)?;
         let config = VeilPool::new(pool::ID, MOCK_VERIFIER, mint, DOMAIN)?;
@@ -189,11 +196,11 @@ impl Fixture {
         Ok(Transaction {
             proof: success_proof(),
             root: tree_state(&self.client, &self.config.tree())?.root,
-            nullifier: field(unique),
-            out_commitment: field(unique + 1_000),
+            nullifiers: [field(unique * 2), field(unique * 2 + 1)],
+            out_commitments: [field(unique * 2 + 1_000), field(unique * 2 + 1_001)],
             amount: 0,
             recipient: self.recipient,
-            encrypted_note: Vec::new(),
+            encrypted_notes: [Vec::new(), Vec::new()],
             recipient_ata: self.recipient_ata,
             verifier: self.verifier,
             mint: self.mint,
@@ -252,14 +259,26 @@ impl Fixture {
     }
 
     pub fn assert_transaction_rejected(&mut self, tx: &Transaction) -> Result<()> {
-        let nullifier = nullifier_address(self.config.address(), &tx.nullifier);
-        let nullifier_before = self.client.get_account(&nullifier).ok().map(|a| a.data);
+        let nullifiers = tx
+            .nullifiers
+            .map(|nullifier| nullifier_address(self.config.address(), &nullifier));
+        let nullifiers_before = nullifiers.map(|address| {
+            self.client
+                .get_account(&address)
+                .ok()
+                .map(|account| account.data)
+        });
         self.assert_rejected(
             transact_instruction(&self.config, self.payer.pubkey(), tx),
             tx.recipient_ata,
         )?;
-        let nullifier_after = self.client.get_account(&nullifier).ok().map(|a| a.data);
-        if nullifier_after != nullifier_before {
+        let nullifiers_after = nullifiers.map(|address| {
+            self.client
+                .get_account(&address)
+                .ok()
+                .map(|account| account.data)
+        });
+        if nullifiers_after != nullifiers_before {
             return Err("rejected transaction changed its nullifier account".into());
         }
         Ok(())

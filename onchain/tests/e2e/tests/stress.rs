@@ -7,15 +7,11 @@ use light_hasher::{Hasher, Poseidon};
 use pool_e2e::{
     harness::{confirmed_transaction, mint_to, tree_state, Result},
     scenario::{field, transact_instruction, Fixture},
+    v1,
 };
 use serial_test::serial;
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    compute_budget::ComputeBudgetInstruction,
-    signature::{Signature, Signer},
-    transaction::Transaction as SolanaTransaction,
-};
+use solana_sdk::signature::{Signature, Signer};
 use solana_transaction_status_client_types::option_serializer::OptionSerializer;
 
 const TREE_DEPTH: usize = 20;
@@ -62,7 +58,7 @@ impl ReferenceTree {
     }
 }
 
-fn commitment_event(client: &RpcClient, signature: &Signature) -> Result<CommitmentEvent> {
+fn commitment_events(client: &RpcClient, signature: &Signature) -> Result<Vec<CommitmentEvent>> {
     let transaction = confirmed_transaction(client, signature)?;
     let meta = transaction
         .transaction
@@ -75,16 +71,20 @@ fn commitment_event(client: &RpcClient, signature: &Signature) -> Result<Commitm
         }
     };
     let discriminator = solana_sdk::hash::hash(b"event:NewCommitment").to_bytes();
+    let mut events = Vec::new();
     for log in logs {
         let Some(encoded) = log.strip_prefix("Program data: ") else {
             continue;
         };
         let bytes = STANDARD.decode(encoded)?;
         if bytes.starts_with(&discriminator[..8]) {
-            return Ok(CommitmentEvent::try_from_slice(&bytes[8..])?);
+            events.push(CommitmentEvent::try_from_slice(&bytes[8..])?);
         }
     }
-    Err("transaction did not emit NewCommitment".into())
+    if events.is_empty() {
+        return Err("transaction did not emit NewCommitment".into());
+    }
+    Ok(events)
 }
 
 #[test]
@@ -105,10 +105,11 @@ fn ninety_six_appends_match_an_independent_reference() -> Result<()> {
     let mut reference = ReferenceTree::new();
     let asset = fixture.config.asset().to_bytes();
     let amount = field(1);
+    let domain = field(5);
     eprintln!("append stress: starting 96 transactions");
     for value in 1..=96 {
         let npk = field(value);
-        let commitment = Poseidon::hashv(&[&npk, &asset, &amount])?;
+        let commitment = Poseidon::hashv(&[&domain, &npk, &asset, &amount])?;
         let expected_root = reference.append(commitment)?;
         fixture.shield(npk, 1, Vec::new())?;
         let actual = tree_state(&fixture.client, &fixture.config.tree())?;
@@ -126,25 +127,20 @@ fn ninety_six_appends_match_an_independent_reference() -> Result<()> {
 
 #[test]
 #[serial]
-#[ignore = "stress: submits 20 writes concurrently"]
+#[ignore = "stress: submits 20 transactions with 40 concurrent tree appends"]
 fn concurrent_spends_emit_unique_indices_and_match_reference() -> Result<()> {
     let fixture = Fixture::start()?;
     let initial = tree_state(&fixture.client, &fixture.config.tree())?;
-    let blockhash = fixture.client.get_latest_blockhash()?;
     let mut transactions = Vec::with_capacity(20);
     for unique in 10_000..10_020 {
         let values = fixture.transaction(unique)?;
         let instruction = transact_instruction(&fixture.config, fixture.payer.pubkey(), &values);
-        transactions.push(SolanaTransaction::new_signed_with_payer(
-            &[
-                ComputeBudgetInstruction::set_compute_unit_limit(650_000),
-                ComputeBudgetInstruction::set_compute_unit_price(unique),
-                instruction,
-            ],
-            Some(&fixture.payer.pubkey()),
-            &[&fixture.payer],
-            blockhash,
-        ));
+        transactions.push(v1::build(
+            fixture.rpc_url(),
+            instruction,
+            &fixture.payer,
+            unique,
+        )?);
     }
 
     // Sign first, then release all RPC submissions from separate clients so
@@ -156,8 +152,7 @@ fn concurrent_spends_emit_unique_indices_and_match_reference() -> Result<()> {
             .map(|transaction| {
                 let rpc_url = rpc_url.clone();
                 scope.spawn(move || {
-                    RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed())
-                        .send_and_confirm_transaction(&transaction)
+                    v1::send(&rpc_url, &transaction).map_err(|error| error.to_string())
                 })
             })
             .collect();
@@ -174,10 +169,13 @@ fn concurrent_spends_emit_unique_indices_and_match_reference() -> Result<()> {
 
     let mut events = signatures
         .iter()
-        .map(|signature| commitment_event(&fixture.client, signature))
-        .collect::<Result<Vec<_>>>()?;
+        .map(|signature| commitment_events(&fixture.client, signature))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     events.sort_unstable_by_key(|event| event.leaf_index);
-    assert_eq!(events.len(), 20);
+    assert_eq!(events.len(), 40);
 
     let mut reference = ReferenceTree::new();
     for (offset, event) in events.iter().enumerate() {
@@ -185,7 +183,7 @@ fn concurrent_spends_emit_unique_indices_and_match_reference() -> Result<()> {
         reference.append(event.commitment)?;
     }
     let final_tree = tree_state(&fixture.client, &fixture.config.tree())?;
-    assert_eq!(final_tree.next_index, initial.next_index + 20);
+    assert_eq!(final_tree.next_index, initial.next_index + 40);
     assert_eq!(final_tree.root, reference.root);
     Ok(())
 }

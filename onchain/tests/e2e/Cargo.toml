@@ -16,10 +16,19 @@ solana-client = "2.3"
 solana-sdk = "2.3"
 solana-system-interface = { version = "1", features = ["bincode"] }
 solana-transaction-status-client-types = "2.3"
+solana-address-v1 = { package = "solana-address", version = "~2.6.1", features = ["atomic", "copy", "decode"] }
+solana-commitment-config-v1 = { package = "solana-commitment-config", version = "3.0.0" }
+solana-instruction-v1 = { package = "solana-instruction", version = "3.4.1" }
+solana-keypair-v1 = { package = "solana-keypair", version = "3.1.2" }
+solana-message-v1 = { package = "solana-message", version = "4.4.1" }
+solana-rpc-client-v1 = { package = "solana-rpc-client", version = "4.2.1" }
+solana-signer-v1 = { package = "solana-signer", version = "3.0.1" }
+solana-transaction-v1 = { package = "solana-transaction", version = "4.1.6" }
 spl-associated-token-account = "7"
 spl-token = "8"
 tempfile = "3"
 veil402-sdk = { path = "../../../crates/veil402-sdk" }
+wincode = "0.5.5"
 
 [dev-dependencies]
 base64 = "0.22"

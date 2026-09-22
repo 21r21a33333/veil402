@@ -4,35 +4,35 @@ use ark_ff::{BigInteger, PrimeField};
 use solana_keccak_hasher as keccak;
 use solana_poseidon::{hashv, Endianness, Parameters};
 
+use crate::ASSET_DOMAIN;
+
 /// Poseidon over BN254 (circom params) — byte-identical to the Noir circuit's hash.
-pub fn poseidon(values: &[&[u8]]) -> Result<[u8; 32]> {
+pub(crate) fn poseidon(values: &[&[u8]]) -> Result<[u8; 32]> {
     Ok(hashv(Parameters::Bn254X5, Endianness::BigEndian, values)
         .map_err(|_| ProgramError::InvalidArgument)?
         .to_bytes())
 }
 
 /// Keccak-256 reduced into the BN254 scalar field.
-pub fn keccak_field(values: &[&[u8]]) -> [u8; 32] {
+pub(crate) fn keccak_field(values: &[&[u8]]) -> [u8; 32] {
     field_bytes(Fr::from_be_bytes_mod_order(
         &keccak::hashv(values).to_bytes(),
     ))
 }
 
 /// Whether bytes are the unique big-endian encoding of a BN254 scalar.
-pub fn is_canonical_field(bytes: &[u8; 32]) -> bool {
+pub(crate) fn is_canonical_field(bytes: &[u8; 32]) -> bool {
     field_bytes(Fr::from_be_bytes_mod_order(bytes)) == *bytes
 }
 
-/// A u64 as a 32-byte big-endian field element.
-pub fn u64_be32(value: u64) -> [u8; 32] {
+pub(crate) fn u64_be32(value: u64) -> [u8; 32] {
     let mut bytes = [0u8; 32];
     bytes[24..32].copy_from_slice(&value.to_be_bytes());
     bytes
 }
 
-/// Split 32 bytes into two field-safe halves (each < 2^128 < P), so a 32-byte pubkey/mint hashes
-/// with Poseidon without exceeding the field.
-pub fn split32(bytes: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+/// Split a pubkey into field-safe halves before hashing it with Poseidon.
+fn split32(bytes: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let mut high = [0u8; 32];
     let mut low = [0u8; 32];
     high[16..32].copy_from_slice(&bytes[0..16]);
@@ -40,10 +40,13 @@ pub fn split32(bytes: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (high, low)
 }
 
-/// Signed public flow as a canonical BN254 field element: `x` for x >= 0,
-/// else `P - |x|`. Take the magnitude as a full `u128` (no `as u64` truncation) and let `Fr` reduce;
-/// arkworks `into_bigint().to_bytes_be()` avoids the ark-serialize flag footgun.
-pub fn public_amount_field(amount: i128) -> [u8; 32] {
+pub(crate) fn asset_id(mint: &Pubkey) -> Result<[u8; 32]> {
+    let (high, low) = split32(&mint.to_bytes());
+    poseidon(&[&u64_be32(ASSET_DOMAIN), &high, &low])
+}
+
+/// Encode signed public flow as a canonical BN254 field element.
+pub(crate) fn public_amount_field(amount: i128) -> [u8; 32] {
     let magnitude = Fr::from(amount.unsigned_abs());
     let field = if amount >= 0 { magnitude } else { -magnitude };
     field_bytes(field)

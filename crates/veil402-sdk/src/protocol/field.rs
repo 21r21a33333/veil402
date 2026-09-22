@@ -1,6 +1,7 @@
 use core::fmt;
 
 use ark_bn254::Fr;
+use rand::RngCore;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::encoding;
@@ -13,6 +14,20 @@ pub struct Field([u8; 32]);
 impl Field {
     /// The additive identity.
     pub const ZERO: Self = Self([0; 32]);
+
+    pub(crate) const fn from_raw_u64(value: u64) -> Self {
+        let bytes = value.to_be_bytes();
+        let mut field = [0_u8; 32];
+        field[24] = bytes[0];
+        field[25] = bytes[1];
+        field[26] = bytes[2];
+        field[27] = bytes[3];
+        field[28] = bytes[4];
+        field[29] = bytes[5];
+        field[30] = bytes[6];
+        field[31] = bytes[7];
+        Self(field)
+    }
 
     /// Parses a canonical 32-byte big-endian field element.
     ///
@@ -41,6 +56,18 @@ impl Field {
 
     pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+
+    pub(crate) fn random(rng: &mut impl RngCore) -> Result<Self, Error> {
+        loop {
+            let mut bytes = [0_u8; 32];
+            rng.try_fill_bytes(&mut bytes).map_err(|_| Error::Random)?;
+            if let Ok(field) = Self::from_bytes(bytes)
+                && field != Self::ZERO
+            {
+                return Ok(field);
+            }
+        }
     }
 }
 
@@ -73,6 +100,19 @@ impl Secret {
     pub fn from_bytes(bytes: [u8; 32]) -> Result<Self, Error> {
         Field::from_bytes(bytes)?;
         Ok(Self(bytes))
+    }
+
+    /// Generates a non-zero secret from the operating system CSPRNG.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Random`] when secure randomness is unavailable.
+    pub fn random() -> Result<Self, Error> {
+        Self::random_with(&mut rand::rngs::OsRng)
+    }
+
+    pub(crate) fn random_with(rng: &mut impl RngCore) -> Result<Self, Error> {
+        Ok(Self(Field::random(rng)?.0))
     }
 
     pub(crate) fn expose(&self) -> Field {
